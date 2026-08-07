@@ -32,6 +32,7 @@ const statusMap: Record<string, Tone> = {
 };
 
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
-  const tone = statusMap[status] ?? 'neutral';
-  return <Badge tone={tone}>{label ?? status.replace(/_/g, ' ')}</Badge>;
+  const safeStatus = status ?? '';
+  const tone = statusMap[safeStatus] ?? 'neutral';
+  return <Badge tone={tone}>{label ?? (safeStatus.replace(/_/g, ' ') || '—')}</Badge>;
 }

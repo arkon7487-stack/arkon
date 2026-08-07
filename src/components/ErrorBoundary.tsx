@@ -23,7 +23,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: { componentStack: string }) {
-    console.error('[ErrorBoundary]', error.message, info.componentStack);
+    if (import.meta.env.DEV) {
+      console.error('[ARKON ERROR BOUNDARY]', error);
+      console.error('[ARKON ERROR BOUNDARY] name:', error.name);
+      console.error('[ARKON ERROR BOUNDARY] message:', error.message);
+      console.error('[ARKON ERROR BOUNDARY] stack:', error.stack);
+      console.error('[ARKON COMPONENT STACK]', info.componentStack);
+    }
   }
 
   reset = () => this.setState({ hasError: false, message: '' });
