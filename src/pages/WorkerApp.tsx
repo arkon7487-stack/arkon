@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   Home, ClipboardCheck, QrCode, UserCircle, Phone, MapPin,
   Clock, CheckCircle2, Play, Square, LogOut, X,
-  Navigation, Bell, FileText, Save,
+  Navigation, Bell, FileText, Save, AlertTriangle,
 } from 'lucide-react';
 import { ArkonLogo } from '@/components/ArkonLogo';
 import { useAuth } from '@/lib/auth';
@@ -336,6 +336,7 @@ export function WorkerHome() {
   const [visits, setVisits] = useState<VisitWithRelations[]>([]);
   const [allVisits, setAllVisits] = useState<VisitWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [selected, setSelected] = useState<VisitWithRelations | null>(null);
 
   const workerName = session?.profile?.employee?.full_name ?? session?.profile?.display_name ?? 'الموظف';
@@ -344,18 +345,37 @@ export function WorkerHome() {
   const loadVisits = useCallback(async () => {
     if (!employeeId) { setLoading(false); return; }
     try {
+      setError(false);
       const all = await visitService.getByEmployee(employeeId);
       setAllVisits(all);
       setVisits(all.filter((v) => isToday(v.scheduled_date)));
-    } catch { /* ignore */ } finally { setLoading(false); }
+    } catch { setError(true); } finally { setLoading(false); }
   }, [employeeId]);
 
   useEffect(() => { loadVisits(); }, [loadVisits]);
 
-  // Realtime: instantly refresh when any visit changes in the database
+  // Realtime: instantly refresh when any visit change in the database
   useVisitRealtime(() => { if (employeeId) loadVisits(); });
 
+  // Focus fallback: refetch when the tab/app regains focus (mobile readiness)
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') loadVisits(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [loadVisits]);
+
   if (loading) return <PageLoader label="جاري التحميل..." />;
+  if (error) return (
+    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center" dir="rtl">
+      <AlertTriangle size={32} className="text-warning-500" />
+      <p className="text-sm text-slate-600">تعذر تحميل الزيارات</p>
+      <button onClick={loadVisits} className="btn-primary">إعادة المحاولة</button>
+    </div>
+  );
   if (!employeeId) return <EmptyState title="لا يوجد ملف موظف" description="لم يتم العثور على ملف الموظف المرتبط بحسابك." />;
 
   const completed = visits.filter((v) => v.status === 'completed').length;
@@ -433,19 +453,40 @@ export function WorkerVisits() {
   const { session } = useAuth();
   const [visits, setVisits] = useState<VisitWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [selected, setSelected] = useState<VisitWithRelations | null>(null);
   const [tab, setTab] = useState<'today' | 'upcoming' | 'history'>('today');
   const employeeId = session?.profile?.employee_id;
 
-  useEffect(() => {
+  const loadVisits = useCallback(async () => {
     if (!employeeId) { setLoading(false); return; }
-    (async () => {
-      try { setVisits(await visitService.getByEmployee(employeeId)); }
-      catch { /* ignore */ } finally { setLoading(false); }
-    })();
+    try {
+      setError(false);
+      setVisits(await visitService.getByEmployee(employeeId));
+    } catch { setError(true); } finally { setLoading(false); }
   }, [employeeId]);
 
+  useEffect(() => { loadVisits(); }, [loadVisits]);
+
+  // Focus fallback: refetch on tab/app focus
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') loadVisits(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [loadVisits]);
+
   if (loading) return <PageLoader label="جاري التحميل..." />;
+  if (error) return (
+    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center" dir="rtl">
+      <AlertTriangle size={32} className="text-warning-500" />
+      <p className="text-sm text-slate-600">تعذر تحميل الزيارات</p>
+      <button onClick={loadVisits} className="btn-primary">إعادة المحاولة</button>
+    </div>
+  );
 
   const today = visits.filter((v) => isToday(v.scheduled_date));
   const upcoming = visits.filter((v) => v.status === 'scheduled' && !isToday(v.scheduled_date));
