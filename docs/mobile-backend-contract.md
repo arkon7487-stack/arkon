@@ -1,0 +1,113 @@
+# ARKON Mobile Backend Contract
+
+This document describes the stable backend contract that the future React Native / Expo mobile app must use. It reflects the current state of the web application on the `backend-security-remediation` branch.
+
+---
+
+## SHARED
+
+- **Supabase project**: Single project, shared by web and mobile.
+- **Service modules to reuse/adapt**: `src/services/*` (visitService, clientService, contractService, invoiceService, paymentService, notificationService, etc.) are framework-agnostic data-access layers. They use `@supabase/supabase-js` directly and return typed objects. On mobile, swap the supabase client initialization but keep the same service interfaces.
+- **Session storage**: `src/lib/sessionStorage.ts` exports a `SessionStorageAdapter` interface. Web uses `localStorage`. Mobile must replace this with Expo SecureStore via `setSessionStorageAdapter()`.
+- **Focus refresh**: `src/lib/useFocusRefresh.ts` uses `document.visibilitychange` / `window.focus`. On mobile, replace with `AppState` change events.
+- **Fields that must never be stored client-side**:
+  - Worker passwords (use Supabase Auth only)
+  - Client PINs (validated server-side via edge function)
+  - Client tokens (stored in secure storage only, never in plain AsyncStorage)
+  - Any financial balance calculations (always derived from server data)
+
+---
+
+## WORKER
+
+### Authentication
+- **Method**: Supabase Auth email/password (`supabase.auth.signInWithPassword`)
+- **Identity resolution**: `auth.uid()` → `profiles.user_id` → `profiles.employee_id` → `employees.id`
+- **RLS function**: `current_user_employee_id()` returns the employee_id for the current auth user
+- **Session inactivity rule**: 48 hours. If `lastActivityAt` in storage is older than 48h, sign out from Supabase Auth and clear local session state.
+- **Activity tracking**: Update `lastActivityAt` on meaningful user interaction (clicks, key presses). Throttle to once per 60 seconds. Do not write on every frame.
+- **Logout behavior**: `supabase.auth.signOut()` + clear `lastActivityAt` + clear cached profile/session. Return to login screen. Next worker must authenticate fresh.
+- **Expired Supabase JWT**: Do not keep the worker logged in. Let `onAuthStateChange` handle it.
+
+### Visits Service
+- **Query**: `visitService.getByEmployee(employeeId)` — selects from `visits` where `employee_id = current_user_employee_id()`
+- **RLS policy**: `select_visits` — `is_current_user_admin() OR (employee_id = current_user_employee_id())`
+- **Visit status source of truth**: The `visits` table in the database. Never use frontend-only state for visit status. Always refetch on app open.
+- **Visit statuses**: `scheduled` → `started` → `completed` (via QR scan). Also: `cancelled`, `archived`.
+- **Visit detail fields**: customer name, address, phone (where allowed), date, start time, end time, expected duration, status, package/service name, visit instructions, notes, QR action, navigation link.
+
+### QR Service
+- **Workflow**: Scheduled → Started (first scan) → Completed (second scan). Unchanged. Do not redesign.
+- **Payload**: QR codes contain a `code_value` that maps to a client. Do not change payload format.
+- **Validation**: `qrService.validate(codeValue)` returns `{ valid, clientId }`.
+
+### Notification / Realtime Strategy
+- **Realtime**: `useVisitRealtime()` subscribes to Supabase Realtime `postgres_changes` on the `visits` table. On any change, refetch visits.
+- **Fallback**: `useFocusRefresh()` refetches when the app/tab regains focus. This is the primary fallback for mobile when Realtime disconnects.
+- **Cleanup**: Always unsubscribe on unmount/logout to avoid duplicate subscriptions.
+
+---
+
+## CUSTOMER
+
+### Authentication
+- **Method**: Phone number + 4-digit PIN (custom, not Supabase Auth)
+- **Edge function**: `arkon-client-auth` — handles `login`, `activate`, `validate_session`, `logout`, `change_pin`, `check_status` actions
+- **Token**: Returned as `token` in the response. Stored in secure storage. Sent as `x-client-token` header on all Supabase requests.
+- **Identity resolution**: `get_client_id_from_token()` reads `request.x_client_token` GUC → looks up `client_sessions` → returns `client_id`
+- **Session expiry**: Client sessions have `expires_at` and `revoked` fields. Expired/revoked tokens return NULL from `get_client_id_from_token()`.
+
+### Visits Retrieval
+- **Query**: `visitService.getByClient(clientId)` — selects from `visits` where `contract.client_id = get_client_id_from_token()`
+- **RLS policy**: `anon_select_own_visits` — uses `get_client_id_from_token()` to ensure customer only sees their own visits
+- **Categorization**:
+  - Upcoming: `status = 'scheduled'` and `scheduled_date >= today`
+  - Current/Started: `status = 'started'`
+  - Completed: `status = 'completed'`
+  - History: all past visits
+- **Timezone**: Use consistent timezone handling. Compare dates as date strings (YYYY-MM-DD) to avoid timezone drift.
+
+### Contracts / Packages
+- **Query**: `supabase.from('contracts').select('*, package:packages(*)').eq('client_id', clientId)`
+- **RLS**: Client can only read their own contracts via `get_client_id_from_token()` policy
+
+### Invoices / Payments / Receivables
+- **Source of truth**: The `contracts` table fields: `final_amount`, `amount_paid`, `remaining_balance`, `payment_status`. The `invoices` and `payments` tables provide detail records.
+- **No duplicate customer balance tables**: The Customer Portal derives all financial data from the same tables used by Finance/Receivables.
+- **Display fields**:
+  - القيمة الإجمالية (total): `contract.final_amount`
+  - المبلغ المدفوع (paid): `contract.amount_paid`
+  - المبلغ المتبقي (remaining): `contract.remaining_balance`
+  - حالة الدفع (payment status): `contract.payment_status` — مدفوع / مدفوع جزئياً / غير مدفوع
+  - المستحق (receivable): `contract.remaining_balance`
+- **Synchronization**: When Admin/Finance records a payment, `contract.amount_paid` and `contract.remaining_balance` are updated. Customer Portal reads these fields directly — no separate calculation.
+
+### Service Requests
+- **Query**: `serviceRequestService.listByClient(clientId)`
+- **Create**: `serviceRequestService.create({ client_id, subject, description })`
+
+### Ratings
+- **Query**: `ratingService.getByVisit(visitId)`
+- **Create**: `ratingService.create({ visitId, clientId, employeeId, rating, comment })`
+
+---
+
+## REALTIME SECURITY NOTE
+
+Customer portal Realtime channels cannot be securely filtered by client token in the current architecture (Realtime uses Supabase Auth, not custom tokens). The web app uses **safe refetch on focus** instead of Realtime for customer portal. The mobile app should do the same until a token-based Realtime auth solution is implemented.
+
+Worker portal uses Supabase Auth, so Realtime works with RLS filtering. This is safe for mobile.
+
+---
+
+## WEB-ONLY ADAPTERS THAT MOBILE MUST REPLACE
+
+| Module | Web | Mobile |
+|---|---|---|
+| `src/lib/sessionStorage.ts` | `localStorage` | Expo SecureStore |
+| `src/lib/useFocusRefresh.ts` | `document.visibilitychange` | `AppState` |
+| `src/lib/qr/webCamera.ts` | `getUserMedia` + `<video>` | `expo-camera` |
+| `src/lib/qr/scanner.ts` | `jsqr` library | `expo-barcode-scanner` |
+| `src/components/QrScannerView.tsx` | `<video>` + canvas | `expo-camera` component |
+
+The QR workflow layer (`src/lib/qr/workflow.ts`) and realtime sync layer (`src/lib/qr/realtime.ts`) are platform-agnostic and can be reused as-is.
