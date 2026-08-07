@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
   Home, ClipboardCheck, CreditCard, Heart, UserCircle,
   LogOut, Phone, MapPin, Clock, Package, Send, FileText,
-  Star, CheckCircle2, Wallet, Lock,
+  Star, CheckCircle2, Wallet, Lock, Bell, AlertCircle, Calendar,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ArkonLogo } from '@/components/ArkonLogo';
@@ -23,9 +23,23 @@ import { formatDate, formatTime, formatCurrency, formatDateTime, cn } from '@/li
 import { VISIT_STATUS_LABELS, PAYMENT_STATUS_LABELS, VISIT_TYPE_LABELS } from '@/lib/locale';
 import type { VisitWithRelations, Client, ServiceRequest, VisitRating } from '@/types';
 import type { RichNotification } from '@/lib/notifications/types';
-import { Bell } from 'lucide-react';
 
 const ARKON_COMPANY_ID = '11111111-1111-1111-1111-111111111111';
+const POLL_INTERVAL_MS = 15000;
+
+function getTodayInHebron(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Hebron' });
+}
+
+function useLivePolling(callback: () => void, enabled: boolean): void {
+  const cbRef = useRef(callback);
+  cbRef.current = callback;
+  useEffect(() => {
+    if (!enabled) return;
+    const interval = setInterval(() => cbRef.current(), POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [enabled]);
+}
 
 /* ===== Helpers ===== */
 
@@ -171,24 +185,35 @@ export function ClientHome() {
   const client = session?.client as Client | null;
   const clientName = client?.full_name ?? 'العميل';
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const loadData = useCallback(async () => {
     if (!clientId) { setLoading(false); return; }
     try {
+      setLoadError(null);
       const [v, inv, contracts] = await Promise.all([
         visitService.getByClient(clientId),
         supabase.from('invoices').select('status, contract:contracts!inner(client_id)').eq('contract.client_id', clientId).neq('status', 'paid'),
         supabase.from('contracts').select('*, package:packages(name)').eq('client_id', clientId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
       ]);
+      if (inv.error) throw inv.error;
       setVisits(v);
       setUnpaidCount(inv.data?.length ?? 0);
       setContract(contracts.data);
-    } catch { /* */ } finally { setLoading(false); }
+    } catch (err) {
+      console.error('[ClientHome] Data load failed:', err);
+      setLoadError((err as Error).message || 'تعذر تحميل البيانات');
+    } finally { setLoading(false); }
   }, [clientId]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  useFocusRefresh(loadData);
+  useLivePolling(loadData, !!clientId);
+
+  // Realtime: refresh when visits, contracts, or invoices change
   useEffect(() => {
     if (!clientId) return;
     const channel = supabase.channel('client-home-changes')
@@ -201,8 +226,18 @@ export function ClientHome() {
   }, [clientId, loadData]);
 
   if (loading) return <PageLoader label="جاري التحميل..." />;
+  if (loadError) return (
+    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center" dir="rtl">
+      <AlertCircle size={32} className="text-danger-400" />
+      <p className="text-sm text-slate-600">تعذر تحميل البيانات</p>
+      <p className="text-xs text-slate-400">{loadError}</p>
+      <button onClick={() => { setLoading(true); loadData(); }} className="btn-ghost">إعادة المحاولة</button>
+    </div>
+  );
 
-  const upcoming = visits.filter((v) => v.status === 'scheduled' || v.status === 'started').slice(0, 3);
+  const todayStr = getTodayInHebron();
+  const todayVisits = visits.filter((v) => v.scheduled_date === todayStr);
+  const upcoming = visits.filter((v) => (v.status === 'scheduled' || v.status === 'started') && v.scheduled_date > todayStr).slice(0, 5);
   const completedVisits = visits.filter((v) => v.status === 'completed');
   const remainingVisits = visits.filter((v) => v.status === 'scheduled').length;
   const packageName = contract?.package?.name ?? null;
@@ -290,6 +325,31 @@ export function ClientHome() {
         </div>
       )}
 
+      {todayVisits.length > 0 && (
+        <div>
+          <h2 className="mb-2 flex items-center gap-1.5 text-sm font-600 text-slate-700">
+            <Calendar size={16} className="text-brand-600" />
+            زيارات اليوم
+          </h2>
+          <div className="space-y-2">
+            {todayVisits.map((v) => (
+              <div key={v.id} className="card flex items-center gap-3 p-3 ring-1 ring-brand-200">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50">
+                  <Clock size={18} className="text-brand-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-600 text-slate-900">{v.scheduled_start_time ? formatTime(v.scheduled_start_time) : '—'}</p>
+                  <p className="text-xs text-slate-500">{v.employee?.full_name ?? 'غير معين'}</p>
+                </div>
+                <span className={cn('rounded-full px-2 py-0.5 text-xs font-600', statusBadgeClass(v.status))}>
+                  {VISIT_STATUS_LABELS[v.status] ?? v.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
         <h2 className="mb-2 text-sm font-600 text-slate-700">الزيارات القادمة</h2>
         {upcoming.length === 0 ? (
@@ -345,8 +405,10 @@ function ServiceRequestModal({ clientId, contractId, onClose }: { clientId: stri
       });
       push('success', 'تم إرسال طلب الدعم بنجاح');
       onClose();
-    } catch {
-      push('error', 'فشل إرسال الطلب');
+    } catch (err) {
+      console.error('[ServiceRequest] Submit failed:', err);
+      const msg = (err as Error).message || 'فشل إرسال الطلب';
+      push('error', `فشل إرسال الطلب: ${msg}`);
     } finally { setSubmitting(false); }
   };
 
@@ -381,19 +443,27 @@ export function ClientVisits() {
   const { session } = useAuth();
   const [visits, setVisits] = useState<VisitWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [ratingVisit, setRatingVisit] = useState<VisitWithRelations | null>(null);
   const clientId = session?.userId;
 
   const loadVisits = useCallback(async () => {
     if (!clientId) { setLoading(false); return; }
-    try { setVisits(await visitService.getByClient(clientId)); }
-    catch { /* */ } finally { setLoading(false); }
+    try {
+      setLoadError(null);
+      setVisits(await visitService.getByClient(clientId));
+    } catch (err) {
+      console.error('[ClientVisits] Load failed:', err);
+      setLoadError((err as Error).message || 'تعذر تحميل الزيارات');
+    } finally { setLoading(false); }
   }, [clientId]);
 
   useEffect(() => { loadVisits(); }, [loadVisits]);
 
   useFocusRefresh(loadVisits);
+  useLivePolling(loadVisits, !!clientId);
 
+  // Realtime: refresh when visits change
   useEffect(() => {
     if (!clientId) return;
     const channel = supabase.channel('client-visits-changes')
@@ -403,13 +473,48 @@ export function ClientVisits() {
   }, [clientId, loadVisits]);
 
   if (loading) return <PageLoader label="جاري التحميل..." />;
+  if (loadError) return (
+    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center" dir="rtl">
+      <AlertCircle size={32} className="text-danger-400" />
+      <p className="text-sm text-slate-600">تعذر تحميل الزيارات</p>
+      <p className="text-xs text-slate-400">{loadError}</p>
+      <button onClick={() => { setLoading(true); loadVisits(); }} className="btn-ghost">إعادة المحاولة</button>
+    </div>
+  );
 
-  const upcoming = visits.filter((v) => v.status === 'scheduled' || v.status === 'started');
-  const history = visits.filter((v) => v.status === 'completed' || v.status === 'cancelled');
+  const todayStr = getTodayInHebron();
+  const todayVisits = visits.filter((v) => v.scheduled_date === todayStr);
+  const upcoming = visits.filter((v) => (v.status === 'scheduled' || v.status === 'started') && v.scheduled_date > todayStr);
+  const history = visits.filter((v) => v.status === 'completed' || v.status === 'cancelled' || v.scheduled_date < todayStr);
 
   return (
     <div className="space-y-4 p-4" dir="rtl">
       <h1 className="font-display text-xl font-700 text-slate-900">زياراتي</h1>
+
+      {todayVisits.length > 0 && (
+        <div>
+          <h2 className="mb-2 flex items-center gap-1.5 text-sm font-600 text-slate-700">
+            <Calendar size={16} className="text-brand-600" />
+            زيارات اليوم
+          </h2>
+          <div className="space-y-2">
+            {todayVisits.map((v) => (
+              <div key={v.id} className="card flex items-center gap-3 p-3 ring-1 ring-brand-200">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50">
+                  <Clock size={18} className="text-brand-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-600 text-slate-900">{v.scheduled_start_time ? formatTime(v.scheduled_start_time) : '—'}</p>
+                  <p className="text-xs text-slate-500">{v.employee?.full_name ?? 'غير معين'}</p>
+                </div>
+                <span className={cn('rounded-full px-2 py-0.5 text-xs font-600', statusBadgeClass(v.status))}>
+                  {VISIT_STATUS_LABELS[v.status] ?? v.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {upcoming.length > 0 && (
         <div>
@@ -591,13 +696,17 @@ export function ClientInvoices() {
       setInvoices((inv.data ?? []).filter((i: any) => !i.visit_id));
       setContract(c.data);
       setVisitCharges(vc);
-    } catch { /* */ } finally { setLoading(false); }
+    } catch (err) {
+      console.error('[ClientInvoices] Load failed:', err);
+    } finally { setLoading(false); }
   }, [clientId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   useFocusRefresh(loadData);
+  useLivePolling(loadData, !!clientId);
 
+  // Realtime: refresh when invoices, contracts, or payments change
   useEffect(() => {
     if (!clientId) return;
     const channel = supabase.channel('client-invoices-changes')
@@ -724,13 +833,17 @@ export function ClientSupport() {
     if (!clientId) { setLoading(false); return; }
     try {
       setTickets(await serviceRequestService.listByClient(clientId));
-    } catch { /* */ } finally { setLoading(false); }
+    } catch (err) {
+      console.error('[ClientSupport] Load failed:', err);
+    } finally { setLoading(false); }
   }, [clientId]);
 
   useEffect(() => { loadTickets(); }, [loadTickets]);
 
   useFocusRefresh(loadTickets);
+  useLivePolling(loadTickets, !!clientId);
 
+  // Realtime: refresh when service requests change
   useEffect(() => {
     if (!clientId) return;
     const channel = supabase.channel('client-support-changes')
@@ -754,8 +867,10 @@ export function ClientSupport() {
       setSubject('');
       setMessage('');
       loadTickets();
-    } catch {
-      push('error', 'فشل إرسال الطلب');
+    } catch (err) {
+      console.error('[ClientSupport] Submit failed:', err);
+      const msg = (err as Error).message || 'فشل إرسال الطلب';
+      push('error', `فشل إرسال الطلب: ${msg}`);
     } finally { setSubmitting(false); }
   };
 
@@ -826,6 +941,7 @@ export function ClientProfile() {
   const [address, setAddress] = useState(client?.address ?? '');
   const [saving, setSaving] = useState(false);
 
+  // PIN change state
   const [showPinChange, setShowPinChange] = useState(false);
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -838,7 +954,8 @@ export function ClientProfile() {
     try {
       await clientService.update(client.id, { phone_number: phone, email, address });
       push('success', 'تم حفظ التغييرات');
-    } catch {
+    } catch (err) {
+      console.error('[ClientProfile] Save failed:', err);
       push('error', 'فشل الحفظ');
     } finally { setSaving(false); }
   };
