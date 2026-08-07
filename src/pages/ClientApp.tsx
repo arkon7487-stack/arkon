@@ -15,6 +15,7 @@ import { serviceRequestService } from '@/services/serviceRequestService';
 import { ratingService } from '@/services/ratingService';
 import { supabase } from '@/lib/supabase';
 import { PageLoader, EmptyState, Spinner } from '@/components/Feedback';
+import { useFocusRefresh } from '@/lib/useFocusRefresh';
 import { formatDate, formatTime, formatCurrency, cn } from '@/lib/utils';
 import { VISIT_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '@/lib/locale';
 import type { VisitWithRelations, Client, ServiceRequest, VisitRating } from '@/types';
@@ -336,6 +337,9 @@ export function ClientVisits() {
 
   useEffect(() => { loadVisits(); }, [loadVisits]);
 
+  // Focus fallback: refetch on tab/app focus
+  useFocusRefresh(loadVisits);
+
   // Realtime: refresh when visits change
   useEffect(() => {
     if (!clientId) return;
@@ -536,6 +540,9 @@ export function ClientInvoices() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Focus fallback: refetch on tab/app focus
+  useFocusRefresh(loadData);
+
   // Realtime: refresh when invoices, contracts, or payments change
   useEffect(() => {
     if (!clientId) return;
@@ -627,6 +634,9 @@ export function ClientSupport() {
   }, [clientId]);
 
   useEffect(() => { loadTickets(); }, [loadTickets]);
+
+  // Focus fallback: refetch on tab/app focus
+  useFocusRefresh(loadTickets);
 
   // Realtime: refresh when service requests change
   useEffect(() => {
