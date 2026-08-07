@@ -22,6 +22,7 @@ const ClientProfilePage = lazy(() => import('@/pages/ClientProfilePage').then(m 
 const EmployeesPage = lazy(() => import('@/pages/EmployeesPage').then(m => ({ default: m.EmployeesPage })));
 const SchedulePage = lazy(() => import('@/pages/SchedulePage').then(m => ({ default: m.SchedulePage })));
 const NotificationsPage = lazy(() => import('@/pages/NotificationsPage').then(m => ({ default: m.NotificationsPage })));
+const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const AdditionalVisitsPage = lazy(() => import('@/pages/AdditionalVisitsPage').then(m => ({ default: m.AdditionalVisitsPage })));
 const VisitsPage = lazy(() => import('@/pages/VisitsPage').then(m => ({ default: m.VisitsPage })));
 const CalendarPage = lazy(() => import('@/pages/CalendarPage').then(m => ({ default: m.CalendarPage })));
