@@ -15,11 +15,15 @@ import { serviceRequestService } from '@/services/serviceRequestService';
 import { ratingService } from '@/services/ratingService';
 import { supabase } from '@/lib/supabase';
 import { additionalVisitService } from '@/services/additionalVisitService';
+import { notificationService } from '@/services/notificationService';
+import { useClientNotifications } from '@/lib/notifications/useClientNotifications';
 import { PageLoader, EmptyState, Spinner } from '@/components/Feedback';
 import { useFocusRefresh } from '@/lib/useFocusRefresh';
-import { formatDate, formatTime, formatCurrency, cn } from '@/lib/utils';
+import { formatDate, formatTime, formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { VISIT_STATUS_LABELS, PAYMENT_STATUS_LABELS, VISIT_TYPE_LABELS } from '@/lib/locale';
 import type { VisitWithRelations, Client, ServiceRequest, VisitRating } from '@/types';
+import type { RichNotification } from '@/lib/notifications/types';
+import { Bell } from 'lucide-react';
 
 const ARKON_COMPANY_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -61,6 +65,22 @@ function contractStatusLabel(status: string): string {
 export function ClientApp() {
   const { session } = useAuth();
   const clientName = session?.client?.full_name ?? 'العميل';
+  const [notifications, setNotifications] = useState<RichNotification[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const loadNotifications = useCallback(async () => {
+    try { setNotifications(await notificationService.listForClient()); } catch { /* */ }
+  }, []);
+
+  useEffect(() => { loadNotifications(); }, [loadNotifications]);
+
+  useClientNotifications({ onNewNotification: () => { loadNotifications(); } });
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const markAllRead = async () => {
+    try { await notificationService.markAllReadForClient(); await loadNotifications(); } catch { /* */ }
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50" dir="rtl">
@@ -71,6 +91,40 @@ export function ClientApp() {
             <Home size={14} />
             الرئيسية
           </Link>
+          <div className="relative">
+            <button onClick={() => setNotifOpen((o) => !o)} className="relative rounded-lg p-2 text-slate-500 transition hover:bg-slate-100">
+              <Bell size={18} />
+              {unreadCount > 0 && (
+                <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger-500 px-1 text-[10px] font-700 text-white">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+            {notifOpen && (
+              <div className="absolute left-0 mt-2 w-72 max-w-[calc(100vw-2rem)] animate-slide-in z-50">
+                <div className="card overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                    <p className="font-display text-sm font-600 text-slate-900">الإشعارات</p>
+                    {unreadCount > 0 && <button onClick={markAllRead} className="text-xs text-brand-600 hover:text-brand-800">تحديد الكل كمقروء</button>}
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <p className="px-4 py-8 text-center text-sm text-slate-400">لا توجد إشعارات</p>
+                    ) : notifications.slice(0, 10).map((n) => (
+                      <div key={n.id} className={cn('flex items-start gap-3 border-b border-slate-100 px-4 py-3', !n.read && 'bg-brand-50')}>
+                        <span className={cn('mt-1.5 h-2 w-2 shrink-0 rounded-full', n.read ? 'bg-slate-300' : 'bg-brand-500')} />
+                        <div className="min-w-0">
+                          <p className="text-sm font-600 text-slate-800">{n.title}</p>
+                          {n.body && <p className="whitespace-pre-line text-xs text-slate-500">{n.body}</p>}
+                          <p className="mt-0.5 text-[10px] text-slate-400">{formatDateTime(n.created_at)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-sm font-600 text-brand-700">
             {clientName.charAt(0)}
           </div>
@@ -135,7 +189,6 @@ export function ClientHome() {
     loadData();
   }, [loadData]);
 
-  // Realtime: refresh when visits, contracts, or invoices change
   useEffect(() => {
     if (!clientId) return;
     const channel = supabase.channel('client-home-changes')
@@ -273,7 +326,7 @@ export function ClientHome() {
 /* ===== Service Request Modal ===== */
 
 function ServiceRequestModal({ clientId, contractId, onClose }: { clientId: string; contractId: string | null; onClose: () => void }) {
-  const { add } = useToast();
+  const { push } = useToast();
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -290,10 +343,10 @@ function ServiceRequestModal({ clientId, contractId, onClose }: { clientId: stri
         subject: subject.trim(),
         message: message.trim(),
       });
-      add('تم إرسال طلب الدعم بنجاح', 'success');
+      push('success', 'تم إرسال طلب الدعم بنجاح');
       onClose();
     } catch {
-      add('فشل إرسال الطلب', 'error');
+      push('error', 'فشل إرسال الطلب');
     } finally { setSubmitting(false); }
   };
 
@@ -339,10 +392,8 @@ export function ClientVisits() {
 
   useEffect(() => { loadVisits(); }, [loadVisits]);
 
-  // Focus fallback: refetch on tab/app focus
   useFocusRefresh(loadVisits);
 
-  // Realtime: refresh when visits change
   useEffect(() => {
     if (!clientId) return;
     const channel = supabase.channel('client-visits-changes')
@@ -427,7 +478,7 @@ export function ClientVisits() {
 /* ===== Rating Modal ===== */
 
 function RatingModal({ visit, clientId, onClose }: { visit: VisitWithRelations; clientId: string; onClose: () => void }) {
-  const { add } = useToast();
+  const { push } = useToast();
   const [rating, setRating] = useState(0);
   const [hover, setHover] = useState(0);
   const [comment, setComment] = useState('');
@@ -450,10 +501,10 @@ function RatingModal({ visit, clientId, onClose }: { visit: VisitWithRelations; 
         rating,
         comment,
       });
-      add('تم إرسال تقييمك بنجاح', 'success');
+      push('success', 'تم إرسال تقييمك بنجاح');
       onClose();
     } catch {
-      add('فشل إرسال التقييم', 'error');
+      push('error', 'فشل إرسال التقييم');
     } finally { setSubmitting(false); }
   };
 
@@ -545,10 +596,8 @@ export function ClientInvoices() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Focus fallback: refetch on tab/app focus
   useFocusRefresh(loadData);
 
-  // Realtime: refresh when invoices, contracts, or payments change
   useEffect(() => {
     if (!clientId) return;
     const channel = supabase.channel('client-invoices-changes')
@@ -668,7 +717,7 @@ export function ClientSupport() {
   const [tickets, setTickets] = useState<ServiceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const { add } = useToast();
+  const { push } = useToast();
   const clientId = session?.userId;
 
   const loadTickets = useCallback(async () => {
@@ -680,10 +729,8 @@ export function ClientSupport() {
 
   useEffect(() => { loadTickets(); }, [loadTickets]);
 
-  // Focus fallback: refetch on tab/app focus
   useFocusRefresh(loadTickets);
 
-  // Realtime: refresh when service requests change
   useEffect(() => {
     if (!clientId) return;
     const channel = supabase.channel('client-support-changes')
@@ -703,12 +750,12 @@ export function ClientSupport() {
         subject: subject.trim(),
         message: message.trim(),
       });
-      add('تم إرسال طلب الدعم', 'success');
+      push('success', 'تم إرسال طلب الدعم');
       setSubject('');
       setMessage('');
       loadTickets();
     } catch {
-      add('فشل إرسال الطلب', 'error');
+      push('error', 'فشل إرسال الطلب');
     } finally { setSubmitting(false); }
   };
 
@@ -772,14 +819,13 @@ function sanitizePin(s: string): string {
 export function ClientProfile() {
   const { session, logout, clientChangePin } = useAuth();
   const navigate = useNavigate();
-  const { add } = useToast();
+  const { push } = useToast();
   const client = session?.client as Client | null;
   const [phone, setPhone] = useState(client?.phone_number ?? '');
   const [email, setEmail] = useState(client?.email ?? '');
   const [address, setAddress] = useState(client?.address ?? '');
   const [saving, setSaving] = useState(false);
 
-  // PIN change state
   const [showPinChange, setShowPinChange] = useState(false);
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -791,24 +837,24 @@ export function ClientProfile() {
     setSaving(true);
     try {
       await clientService.update(client.id, { phone_number: phone, email, address });
-      add('تم حفظ التغييرات', 'success');
+      push('success', 'تم حفظ التغييرات');
     } catch {
-      add('فشل الحفظ', 'error');
+      push('error', 'فشل الحفظ');
     } finally { setSaving(false); }
   };
 
   const handleChangePin = async () => {
     if (!client?.id) return;
-    if (newPin !== confirmNewPin) { add('رمزا PIN غير متطابقين', 'error'); return; }
-    if (!/^\d{4}$/.test(newPin)) { add('رمز PIN يجب أن يكون 4 أرقام', 'error'); return; }
+    if (newPin !== confirmNewPin) { push('error', 'رمزا PIN غير متطابقين'); return; }
+    if (!/^\d{4}$/.test(newPin)) { push('error', 'رمز PIN يجب أن يكون 4 أرقام'); return; }
     setPinSaving(true);
     try {
       await clientChangePin(client.id, currentPin, newPin, confirmNewPin);
-      add('تم تغيير رمز PIN بنجاح', 'success');
+      push('success', 'تم تغيير رمز PIN بنجاح');
       setShowPinChange(false);
       setCurrentPin(''); setNewPin(''); setConfirmNewPin('');
     } catch (err) {
-      add((err as Error).message, 'error');
+      push('error', (err as Error).message);
     } finally { setPinSaving(false); }
   };
 
