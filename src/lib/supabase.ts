@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { sessionStorage } from '@/lib/sessionStorage';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -7,9 +8,7 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 // The Customer Portal authenticates via a custom token (not Supabase Auth).
 // We inject it as an `x-client-token` header on every Supabase request so that
 // the RLS function `get_client_id_from_token()` can resolve the logged-in client.
-let clientToken: string | null = typeof localStorage !== 'undefined'
-  ? localStorage.getItem('arkon_client_token')
-  : null;
+let clientToken: string | null = sessionStorage.get('arkon_client_token');
 
 export function setClientToken(token: string | null) {
   clientToken = token;
