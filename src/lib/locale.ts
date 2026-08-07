@@ -61,6 +61,14 @@ export const PAYMENT_STATUS_LABELS: Record<string, string> = {
   partial: 'مدفوع جزئياً',
   paid: 'مدفوع',
   overdue: 'متأخر',
+  issued: 'صادر',
+  partially_paid: 'مدفوع جزئياً',
+};
+
+export const VISIT_TYPE_LABELS: Record<string, string> = {
+  normal: 'زيارة عادية',
+  additional: 'زيارة إضافية',
+  emergency: 'زيارة طارئة',
 };
 
 export const EMPLOYMENT_STATUS_LABELS: Record<string, string> = {

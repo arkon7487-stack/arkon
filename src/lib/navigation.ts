@@ -3,7 +3,7 @@ import {
   Bell, Settings, type LucideIcon,
   CalendarDays, BarChart3, ScrollText, ClipboardCheck, Receipt,
   Home, QrCode, UserCircle, CreditCard, Heart,
-  Boxes, Target, Wallet, TrendingUp,
+  Boxes, Target, Wallet, TrendingUp, CalendarPlus,
 } from 'lucide-react';
 
 export interface NavEntry {
@@ -28,6 +28,7 @@ export const STAFF_NAV: NavGroup[] = [
       { to: '/contracts', label: 'العقود', icon: FileText, permission: 'contracts' },
       { to: '/packages', label: 'الباقات', icon: Package, permission: 'packages' },
       { to: '/visits', label: 'الزيارات', icon: ClipboardCheck, permission: 'visits' },
+      { to: '/additional-visits', label: 'زيارات إضافية', icon: CalendarPlus, permission: 'visits' },
       { to: '/invoices', label: 'الفواتير', icon: Receipt, permission: 'invoices' },
       { to: '/schedule', label: 'الجدولة', icon: CalendarClock, permission: 'schedule' },
       { to: '/calendar', label: 'التقويم', icon: CalendarDays, permission: 'calendar' },

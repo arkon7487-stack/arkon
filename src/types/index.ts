@@ -227,6 +227,8 @@ export interface ContractTimelineEntry {
   created_at: string;
 }
 
+export type VisitType = 'normal' | 'additional' | 'emergency';
+
 export interface Visit {
   id: string;
   contract_id: string;
@@ -248,6 +250,9 @@ export interface Visit {
   assigned_at: string | null;
   archived_at: string | null;
   notes: string | null;
+  visit_type: VisitType;
+  visit_charge_amount: number | null;
+  special_instructions: string | null;
   created_at: string;
   updated_at: string;
   employee?: Employee | null;
@@ -277,6 +282,11 @@ export interface Invoice {
   total: number;
   status: string;
   notes: string | null;
+  visit_id: string | null;
+  charge_type: string;
+  amount_paid: number;
+  remaining_balance: number;
+  payment_status: string;
   created_at: string;
   updated_at: string;
 }

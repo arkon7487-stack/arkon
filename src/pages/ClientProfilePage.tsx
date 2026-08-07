@@ -4,8 +4,9 @@ import {
   ArrowRight, Phone, Mail, MapPin, FileText, Calendar, Paperclip,
   Receipt, Activity, User, Package as PackageIcon, QrCode, Printer,
   CheckCircle2, Clock, XCircle, CalendarClock, UserCheck, ClipboardList,
-  Siren, AlertCircle, Trash2, Lock, KeyRound,
+  Siren, AlertCircle, Trash2, Lock, KeyRound, CalendarPlus,
 } from 'lucide-react';
+import { AdditionalVisitModal } from '@/components/AdditionalVisitModal';
 import { clientService } from '@/services/clientService';
 import { PageLoader, EmptyState } from '@/components/Feedback';
 import { StatusBadge } from '@/components/Badge';
@@ -41,6 +42,7 @@ export function ClientProfilePage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pinActionLoading, setPinActionLoading] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [showAddVisit, setShowAddVisit] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -170,6 +172,16 @@ export function ClientProfilePage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setShowAddVisit(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-4 py-2 text-sm font-600 text-white shadow-glow transition hover:bg-brand-600"
+        >
+          <CalendarPlus size={16} /> إضافة زيارة
+        </button>
       </div>
 
       {/* 1. Customer Information */}
@@ -444,6 +456,17 @@ export function ClientProfilePage() {
         message="هل أنت متأكد من حذف هذا العميل نهائياً؟ سيتم حذف العقود والزيارات ورمز QR. الفواتير والمدفوعات ستبقى محفوظة كأرشيف للحفاظ على السلامة المالية. لا يمكن التراجع عن هذا الإجراء."
         confirmLabel={deleting ? 'جارٍ الحذف…' : 'حذف العميل'}
         danger
+      />
+
+      <AdditionalVisitModal
+        open={showAddVisit}
+        onClose={() => setShowAddVisit(false)}
+        clientId={client.id}
+        clientName={client.full_name}
+        onCreated={() => {
+          setShowAddVisit(false);
+          window.location.reload();
+        }}
       />
     </div>
   );
