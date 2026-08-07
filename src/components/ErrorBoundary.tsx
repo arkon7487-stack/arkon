@@ -2,6 +2,7 @@ import { Component, type ReactNode } from 'react';
 
 interface Props {
   children: ReactNode;
+  resetKey?: string;
 }
 interface State {
   hasError: boolean;
@@ -13,6 +14,12 @@ export class ErrorBoundary extends Component<Props, State> {
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, message: error.message };
+  }
+
+  componentDidUpdate(prevProps: Props) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, message: '' });
+    }
   }
 
   componentDidCatch(error: Error, info: { componentStack: string }) {
@@ -41,10 +48,10 @@ export class ErrorBoundary extends Component<Props, State> {
             إعادة المحاولة
           </button>
           <button
-            onClick={() => { window.location.href = '/dashboard'; }}
+            onClick={() => { window.location.href = '/'; }}
             className="btn-secondary"
           >
-            العودة للوحة الرئيسية
+            العودة للصفحة الرئيسية
           </button>
         </div>
       </div>

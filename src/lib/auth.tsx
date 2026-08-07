@@ -155,8 +155,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setSession({ kind: 'staff', userId: supaSession.user.id, profile, role: profile?.role ?? null, permissions: perms });
               setPermissions(perms);
             }
+            // If profile is null, keep the existing session — don't clear it
           } catch {
-            // profile lookup failed — don't crash the auth state change
+            // profile lookup failed — keep existing session, don't crash
           }
         }
       })();

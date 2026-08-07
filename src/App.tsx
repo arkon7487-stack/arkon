@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { lazy, Suspense, useEffect } from 'react';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { ToastProvider } from '@/components/Toast';
@@ -103,8 +103,9 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
 }
 
 function LazyPage({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
   return (
-    <ErrorBoundary>
+    <ErrorBoundary resetKey={location.pathname}>
       <Suspense fallback={<PageLoader />}>
         {children}
       </Suspense>
@@ -123,7 +124,7 @@ export default function App() {
             <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
 
             {/* Staff routes */}
-            <Route element={<ProtectedRoute><ErrorBoundary><DashboardLayout /></ErrorBoundary></ProtectedRoute>}>
+            <Route element={<ProtectedRoute><ErrorBoundary resetKey="staff-layout"><DashboardLayout /></ErrorBoundary></ProtectedRoute>}>
               <Route path="/dashboard" element={<ProtectedRoute permission="dashboard"><LazyPage><DashboardPage /></LazyPage></ProtectedRoute>} />
               <Route path="/packages" element={<ProtectedRoute permission="packages"><LazyPage><PackagesPage /></LazyPage></ProtectedRoute>} />
               <Route path="/contracts" element={<ProtectedRoute permission="contracts"><LazyPage><ContractsPage /></LazyPage></ProtectedRoute>} />
@@ -149,7 +150,7 @@ export default function App() {
             </Route>
 
             {/* Worker mobile app */}
-            <Route element={<ProtectedRoute permission="worker_home"><ErrorBoundary><WorkerApp /></ErrorBoundary></ProtectedRoute>}>
+            <Route element={<ProtectedRoute permission="worker_home"><ErrorBoundary resetKey="worker-layout"><WorkerApp /></ErrorBoundary></ProtectedRoute>}>
               <Route path="/worker" element={<ProtectedRoute permission="worker_home"><WorkerHome /></ProtectedRoute>} />
               <Route path="/worker/visits" element={<ProtectedRoute permission="worker_visits"><WorkerVisits /></ProtectedRoute>} />
               <Route path="/worker/qr" element={<ProtectedRoute permission="worker_qr"><WorkerQr /></ProtectedRoute>} />
@@ -158,7 +159,7 @@ export default function App() {
             </Route>
 
             {/* Client mobile app */}
-            <Route element={<ProtectedRoute permission="client_home"><ErrorBoundary><ClientApp /></ErrorBoundary></ProtectedRoute>}>
+            <Route element={<ProtectedRoute permission="client_home"><ErrorBoundary resetKey="client-layout"><ClientApp /></ErrorBoundary></ProtectedRoute>}>
               <Route path="/client" element={<ProtectedRoute permission="client_home"><ClientHome /></ProtectedRoute>} />
               <Route path="/client/visits" element={<ProtectedRoute permission="client_visits"><ClientVisits /></ProtectedRoute>} />
               <Route path="/client/invoices" element={<ProtectedRoute permission="client_invoices"><ClientInvoices /></ProtectedRoute>} />
