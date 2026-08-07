@@ -19,9 +19,14 @@ import { formatDate, formatTime, cn } from '@/lib/utils';
 import { VISIT_STATUS_LABELS, VISIT_TYPE_LABELS } from '@/lib/locale';
 import { QrScannerView, type ScanPhase, type ScanOutcome } from '@/components/QrScannerView';
 import { QrWorkflow } from '@/lib/qr/workflow';
+import type { QrWorkflowResult } from '@/lib/qr/types';
 import type { VisitWithRelations, NotificationItem } from '@/types';
 
 /* ===== Helpers ===== */
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function getClientName(v: VisitWithRelations): string {
   return v.contract?.client?.full_name ?? v.client?.full_name ?? 'عميل';
@@ -59,6 +64,7 @@ function isToday(dateStr: string): boolean {
 
 function VisitDetailModal({ visit, onClose, onNotesSaved }: { visit: VisitWithRelations; onClose: () => void; onNotesSaved?: () => void }) {
   const { add } = useToast();
+  const { session } = useAuth();
   const [scanning, setScanning] = useState(false);
   const [scanPhase, setScanPhase] = useState<ScanPhase>('searching');
   const [scanOutcome, setScanOutcome] = useState<ScanOutcome | null>(null);
@@ -87,12 +93,11 @@ function VisitDetailModal({ visit, onClose, onNotesSaved }: { visit: VisitWithRe
     setScanPhase('validating');
     await sleep(400);
 
-    // --- Business operation: QR validation + database update ---
-    let result;
+    let result: QrWorkflowResult;
     try {
-      result = await QrWorkflow.processScanForVisit(code, visit);
-    } catch (err) {
-      setScanOutcome({ success: false, message: (err as Error).message });
+      result = await QrWorkflow.processScanForVisit(code, visit, session?.profile?.employee_id);
+    } catch {
+      setScanOutcome({ success: false, message: 'تعذر تحديث الزيارة، تحقق من الاتصال وحاول مرة أخرى' });
       setScanPhase('error');
       return;
     }
@@ -103,18 +108,16 @@ function VisitDetailModal({ visit, onClose, onNotesSaved }: { visit: VisitWithRe
       return;
     }
 
-    // --- Database update succeeded. Success is confirmed. ---
     setScanPhase('updating');
     await sleep(300);
     setScanOutcome({
       success: true,
       action: result.action ?? undefined,
-      message: result.action === 'start_visit' ? 'تم بدء الزيارة بنجاح' : 'تم إنهاء الزيارة بنجاح',
+      message: result.action === 'start_visit' ? 'بدأت الزيارة' : 'تم إنهاء الزيارة',
     });
     setScanPhase('success');
 
-    // Post-success toast (non-blocking)
-    try { add(result.message, 'success'); } catch (e) { console.warn('[QR] toast failed:', e); }
+    try { add(result.message, 'success'); } catch { /* toast is non-critical */ }
 
     closeTimerRef.current = setTimeout(() => {
       setScanning(false);
@@ -564,12 +567,11 @@ export function WorkerQr() {
     setScanPhase('validating');
     await sleep(400);
 
-    // --- Business operation: QR validation + database update ---
-    let wfResult;
+    let wfResult: QrWorkflowResult;
     try {
       wfResult = await QrWorkflow.processScan(code, visits);
-    } catch (err) {
-      setScanOutcome({ success: false, message: (err as Error).message });
+    } catch {
+      setScanOutcome({ success: false, message: 'تعذر تحديث الزيارة، تحقق من الاتصال وحاول مرة أخرى' });
       setScanPhase('error');
       return;
     }
@@ -580,19 +582,17 @@ export function WorkerQr() {
       return;
     }
 
-    // --- Database update succeeded. Success is confirmed. ---
     setScanPhase('updating');
     await sleep(300);
     setScanOutcome({
       success: true,
       action: wfResult.action ?? undefined,
-      message: wfResult.action === 'start_visit' ? 'تم بدء الزيارة بنجاح' : 'تم إنهاء الزيارة بنجاح',
+      message: wfResult.action === 'start_visit' ? 'بدأت الزيارة' : 'تم إنهاء الزيارة',
     });
     setScanPhase('success');
 
-    // Post-success side effects (non-blocking)
-    try { add(wfResult.message, 'success'); } catch (e) { console.warn('[QR] toast failed:', e); }
-    try { loadVisits(); } catch (e) { console.warn('[QR] list refresh failed:', e); }
+    try { add(wfResult.message, 'success'); } catch { /* toast is non-critical */ }
+    try { loadVisits(); } catch { /* list refresh is non-critical */ }
 
     setTimeout(() => {
       setScanPhase('searching');
