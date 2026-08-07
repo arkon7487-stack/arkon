@@ -14,6 +14,23 @@ body,
   height: 100%;
 }
 
+/* Prevent iOS text auto-zoom on input focus (requires >=16px font) */
+@media (max-width: 640px) {
+  .input, input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Modern viewport units with fallback */
+@supports (height: 100dvh) {
+  .h-screen-safe { height: 100dvh; }
+  .max-h-screen-safe { max-height: 100dvh; }
+}
+@supports not (height: 100dvh) {
+  .h-screen-safe { height: 100vh; }
+  .max-h-screen-safe { max-height: 100vh; }
+}
+
 body {
   margin: 0;
   font-family: 'Cairo', 'Inter', system-ui, sans-serif;
@@ -21,6 +38,27 @@ body {
   color: #0f172a;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Prevent horizontal scroll on mobile */
+  overflow-x: hidden;
+  /* Improve touch scrolling */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Reduce expensive animations on mobile */
+@media (max-width: 768px) {
+  .animate-wm-float,
+  .animate-wm-glow,
+  .animate-wm-breathe,
+  .animate-geo-drift,
+  .animate-geo-drift-2 {
+    animation-duration: 0s !important;
+    animation: none !important;
+  }
+  /* Reduce blur intensity on mobile for performance */
+  .blur-[120px], .blur-[150px], .blur-[100px] {
+    --tw-blur: blur(40px) !important;
+    filter: var(--tw-blur) !important;
+  }
 }
 
 * {
