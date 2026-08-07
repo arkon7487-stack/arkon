@@ -147,7 +147,7 @@ export default function App() {
             </Route>
 
             {/* Worker mobile app */}
-            <Route element={<ProtectedRoute permission="worker_home"><WorkerApp /></ProtectedRoute>}>
+            <Route element={<ProtectedRoute permission="worker_home"><ErrorBoundary><WorkerApp /></ErrorBoundary></ProtectedRoute>}>
               <Route path="/worker" element={<ProtectedRoute permission="worker_home"><WorkerHome /></ProtectedRoute>} />
               <Route path="/worker/visits" element={<ProtectedRoute permission="worker_visits"><WorkerVisits /></ProtectedRoute>} />
               <Route path="/worker/qr" element={<ProtectedRoute permission="worker_qr"><WorkerQr /></ProtectedRoute>} />
@@ -156,7 +156,7 @@ export default function App() {
             </Route>
 
             {/* Client mobile app */}
-            <Route element={<ProtectedRoute permission="client_home"><ClientApp /></ProtectedRoute>}>
+            <Route element={<ProtectedRoute permission="client_home"><ErrorBoundary><ClientApp /></ErrorBoundary></ProtectedRoute>}>
               <Route path="/client" element={<ProtectedRoute permission="client_home"><ClientHome /></ProtectedRoute>} />
               <Route path="/client/visits" element={<ProtectedRoute permission="client_visits"><ClientVisits /></ProtectedRoute>} />
               <Route path="/client/invoices" element={<ProtectedRoute permission="client_invoices"><ClientInvoices /></ProtectedRoute>} />
