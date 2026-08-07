@@ -16,7 +16,7 @@ import { useNotifications } from '@/lib/notifications/useNotifications';
 import { requestBrowserNotificationPermission } from '@/lib/notifications/manager';
 import { PageLoader, EmptyState } from '@/components/Feedback';
 import { formatDate, formatTime, cn } from '@/lib/utils';
-import { VISIT_STATUS_LABELS } from '@/lib/locale';
+import { VISIT_STATUS_LABELS, VISIT_TYPE_LABELS } from '@/lib/locale';
 import { QrScannerView, type ScanPhase, type ScanOutcome } from '@/components/QrScannerView';
 import { QrWorkflow } from '@/lib/qr/workflow';
 import type { VisitWithRelations, NotificationItem } from '@/types';
@@ -156,6 +156,11 @@ function VisitDetailModal({ visit, onClose, onNotesSaved }: { visit: VisitWithRe
           <div className="rounded-xl bg-slate-50 p-4">
             <p className="text-xs text-slate-400">العميل</p>
             <p className="font-600 text-slate-900">{getClientName(visit)}</p>
+            {visit.visit_type && visit.visit_type !== 'normal' && (
+              <span className={cn('mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-600', visit.visit_type === 'emergency' ? 'bg-danger-50 text-danger-700' : 'bg-brand-50 text-brand-700')}>
+                {visit.visit_type === 'emergency' ? 'زيارة طارئة' : 'زيارة إضافية'}
+              </span>
+            )}
             <p className="mt-1 text-xs text-slate-400">الباقة</p>
             <p className="text-sm text-slate-700">{getPackageName(visit)}</p>
           </div>
@@ -354,7 +359,7 @@ export function WorkerHome() {
 
   useEffect(() => { loadVisits(); }, [loadVisits]);
 
-  // Realtime: instantly refresh when any visit change in the database
+  // Realtime: instantly refresh when any visit changes in the database
   useVisitRealtime(() => { if (employeeId) loadVisits(); });
 
   // Focus fallback: refetch when the tab/app regains focus (mobile readiness)
@@ -432,6 +437,11 @@ export function WorkerHome() {
                 <div className="flex-1">
                   <p className="font-600 text-slate-900">{getClientName(v)}</p>
                   <p className="text-xs text-slate-500">{formatTime(v.scheduled_start_time ?? '')} • {getClientAddress(v)}</p>
+                  {v.visit_type && v.visit_type !== 'normal' && (
+                    <span className={cn('mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-600', v.visit_type === 'emergency' ? 'bg-danger-50 text-danger-700' : 'bg-brand-50 text-brand-700')}>
+                      {VISIT_TYPE_LABELS[v.visit_type] ?? v.visit_type}
+                    </span>
+                  )}
                 </div>
                 <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-600', statusBadgeClass(v.status))}>
                   {VISIT_STATUS_LABELS[v.status] ?? v.status}

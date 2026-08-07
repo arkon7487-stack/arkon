@@ -14,10 +14,11 @@ import { clientService } from '@/services/clientService';
 import { serviceRequestService } from '@/services/serviceRequestService';
 import { ratingService } from '@/services/ratingService';
 import { supabase } from '@/lib/supabase';
+import { additionalVisitService } from '@/services/additionalVisitService';
 import { PageLoader, EmptyState, Spinner } from '@/components/Feedback';
 import { useFocusRefresh } from '@/lib/useFocusRefresh';
 import { formatDate, formatTime, formatCurrency, cn } from '@/lib/utils';
-import { VISIT_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '@/lib/locale';
+import { VISIT_STATUS_LABELS, PAYMENT_STATUS_LABELS, VISIT_TYPE_LABELS } from '@/lib/locale';
 import type { VisitWithRelations, Client, ServiceRequest, VisitRating } from '@/types';
 
 const ARKON_COMPANY_ID = '11111111-1111-1111-1111-111111111111';
@@ -519,22 +520,25 @@ export function ClientInvoices() {
   const { session } = useAuth();
   const [invoices, setInvoices] = useState<any[]>([]);
   const [contract, setContract] = useState<any>(null);
+  const [visitCharges, setVisitCharges] = useState<Array<{ visit: any; invoice: any }>>([]);
   const [loading, setLoading] = useState(true);
   const clientId = session?.userId;
 
   const loadData = useCallback(async () => {
     if (!clientId) { setLoading(false); return; }
     try {
-      const [inv, c] = await Promise.all([
+      const [inv, c, vc] = await Promise.all([
         supabase
           .from('invoices')
           .select('*, contract:contracts!inner(client_id)')
           .eq('contract.client_id', clientId)
           .order('created_at', { ascending: false }),
         supabase.from('contracts').select('*, package:packages(name)').eq('client_id', clientId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+        additionalVisitService.getCustomerVisitCharges(clientId),
       ]);
-      setInvoices(inv.data ?? []);
+      setInvoices((inv.data ?? []).filter((i: any) => !i.visit_id));
       setContract(c.data);
+      setVisitCharges(vc);
     } catch { /* */ } finally { setLoading(false); }
   }, [clientId]);
 
@@ -610,6 +614,46 @@ export function ClientInvoices() {
           </div>
         )}
       </div>
+
+      {visitCharges.length > 0 && (
+        <div>
+          <h2 className="mb-2 text-sm font-600 text-slate-700">الزيارات الإضافية والطارئة</h2>
+          <div className="space-y-2">
+            {visitCharges.map(({ visit, invoice }) => (
+              <div key={visit.id} className="card p-4">
+                <div className="flex items-center justify-between">
+                  <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-600',
+                    visit.visit_type === 'emergency' ? 'bg-danger-50 text-danger-700' : 'bg-brand-50 text-brand-700')}>
+                    {VISIT_TYPE_LABELS[visit.visit_type] ?? visit.visit_type}
+                  </span>
+                  <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-600',
+                    invoice ? payBadgeClass(invoice.payment_status) : 'bg-slate-100 text-slate-600')}>
+                    {invoice ? (PAYMENT_STATUS_LABELS[invoice.payment_status] ?? invoice.payment_status) : 'صادر'}
+                  </span>
+                </div>
+                <div className="mt-2 space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">التاريخ</span>
+                    <span className="font-600 text-slate-900">{formatDate(visit.scheduled_date)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">القيمة</span>
+                    <span className="font-600 text-slate-900">{formatCurrency(invoice?.total ?? visit.visit_charge_amount ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">المدفوع</span>
+                    <span className="font-600 text-success-600">{formatCurrency(invoice?.amount_paid ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">المتبقي</span>
+                    <span className="font-600 text-warning-600">{formatCurrency(invoice?.remaining_balance ?? invoice?.total ?? visit.visit_charge_amount ?? 0)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
