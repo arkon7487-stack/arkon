@@ -1,37 +1,47 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Inbox, Phone, MapPin, Clock, User, Globe, Search, Filter } from 'lucide-react';
+import { Inbox, Phone, Clock, Search, ArrowRightCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/Toast';
 import { PageLoader, EmptyState } from '@/components/Feedback';
 import { Modal } from '@/components/Modal';
 import { formatDate, formatDateTime, cn } from '@/lib/utils';
-import type { ServiceRequest, Client } from '@/types';
+import type { ServiceRequest } from '@/types';
 
 const STATUS_LABELS: Record<string, string> = {
   open: 'مفتوح',
   in_progress: 'قيد المعالجة',
   resolved: 'تم الحل',
-  closed: 'مغلق',
 };
 
-function statusBadge(status: string): string {
+const FORWARD_STATUS: Record<string, string | null> = {
+  open: 'in_progress',
+  in_progress: 'resolved',
+  resolved: null,
+};
+
+const FORWARD_LABEL: Record<string, string | null> = {
+  open: 'ترحيل إلى قيد المعالجة',
+  in_progress: 'ترحيل إلى تم الحل',
+  resolved: null,
+};
+
+function statusBadgeClass(status: string): string {
   switch (status) {
     case 'open': return 'bg-brand-50 text-brand-700';
     case 'in_progress': return 'bg-warning-50 text-warning-700';
     case 'resolved': return 'bg-success-50 text-success-700';
-    case 'closed': return 'bg-slate-100 text-slate-600';
     default: return 'bg-slate-100 text-slate-600';
   }
 }
 
-function sourceBadge(source: string) {
-  const isCustomer = source === 'customer_portal';
-  return (
-    <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-600',
-      isCustomer ? 'bg-brand-50 text-brand-700' : 'bg-accent-50 text-accent-700')}>
-      {isCustomer ? 'عميل حالي' : 'طلب من الموقع'}
-    </span>
-  );
+function sourceBadgeClass(source: string): string {
+  return source === 'customer_portal'
+    ? 'bg-brand-50 text-brand-700'
+    : 'bg-accent-50 text-accent-700';
+}
+
+function sourceLabel(source: string): string {
+  return source === 'customer_portal' ? 'عميل حالي' : 'طلب من الموقع';
 }
 
 export function SupportPage() {
@@ -42,6 +52,7 @@ export function SupportPage() {
   const [filterSource, setFilterSource] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selected, setSelected] = useState<ServiceRequest | null>(null);
+  const [transferring, setTransferring] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,18 +73,36 @@ export function SupportPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const updateStatus = async (id: string, status: string) => {
+  const transferStatus = async (id: string, currentStatus: string) => {
+    const nextStatus = FORWARD_STATUS[currentStatus];
+    if (!nextStatus) return;
+
+    setTransferring(true);
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('service_requests')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .update({ status: nextStatus, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select('*, client:clients(*)')
+        .maybeSingle();
       if (error) throw error;
-      push('success', 'تم تحديث الحالة');
-      load();
-      setSelected((prev) => prev ? { ...prev, status } : null);
+
+      push('success', `تم تحديث الحالة إلى: ${STATUS_LABELS[nextStatus]}`);
+
+      const updated = data as ServiceRequest | null;
+      if (updated) {
+        setSelected(updated);
+      } else {
+        setSelected((prev) => prev ? { ...prev, status: nextStatus } : null);
+      }
+
+      setRequests((prev) =>
+        prev.map((r) => (r.id === id ? (updated ?? { ...r, status: nextStatus }) : r))
+      );
     } catch (err) {
       push('error', (err as Error).message);
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -117,7 +146,7 @@ export function SupportPage() {
           <p className="mt-2 font-display text-2xl font-700 text-warning-600">{inProgressCount}</p>
         </div>
         <div className="card p-4">
-          <div className="flex items-center gap-2 text-slate-500"><Clock size={16} /><span className="text-xs">تم الحل</span></div>
+          <div className="flex items-center gap-2 text-slate-500"><CheckCircle2 size={16} /><span className="text-xs">تم الحل</span></div>
           <p className="mt-2 font-display text-2xl font-700 text-success-600">{resolvedCount}</p>
         </div>
       </div>
@@ -134,7 +163,9 @@ export function SupportPage() {
         </select>
         <select className="input max-w-[160px]" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="all">كل الحالات</option>
-          {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          <option value="open">مفتوح</option>
+          <option value="in_progress">قيد المعالجة</option>
+          <option value="resolved">تم الحل</option>
         </select>
       </div>
 
@@ -157,8 +188,10 @@ export function SupportPage() {
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  {sourceBadge(r.source)}
-                  <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-600', statusBadge(r.status))}>
+                  <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-600', sourceBadgeClass(r.source))}>
+                    {sourceLabel(r.source)}
+                  </span>
+                  <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-600', statusBadgeClass(r.status))}>
                     {STATUS_LABELS[r.status] ?? r.status}
                   </span>
                 </div>
@@ -177,25 +210,49 @@ export function SupportPage() {
         title="تفاصيل الطلب"
         size="md"
         footer={
-          <>
-            <select
-              className="input max-w-[180px]"
-              value={selected?.status ?? 'open'}
-              onChange={(e) => selected && updateStatus(selected.id, e.target.value)}
-            >
-              {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-            <button onClick={() => setSelected(null)} className="btn-ghost">إغلاق</button>
-          </>
+          selected && (
+            <div className="flex w-full items-center justify-between gap-3">
+              {FORWARD_STATUS[selected.status] ? (
+                <button
+                  onClick={() => transferStatus(selected.id, selected.status)}
+                  disabled={transferring}
+                  className="btn-primary"
+                >
+                  {transferring ? (
+                    <><Loader2 size={16} className="animate-spin" /> جارٍ التحديث…</>
+                  ) : (
+                    <><ArrowRightCircle size={16} /> {FORWARD_LABEL[selected.status]}</>
+                  )}
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 text-sm font-600 text-success-600">
+                  <CheckCircle2 size={18} />
+                  تم حل الطلب
+                </div>
+              )}
+              <button onClick={() => setSelected(null)} className="btn-ghost">إغلاق</button>
+            </div>
+          )
         }
       >
         {selected && (
           <div className="space-y-4" dir="rtl">
             <div className="flex items-center gap-2">
-              {sourceBadge(selected.source)}
-              <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-600', statusBadge(selected.status))}>
+              <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-600', sourceBadgeClass(selected.source))}>
+                {sourceLabel(selected.source)}
+              </span>
+              <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-600', statusBadgeClass(selected.status))}>
                 {STATUS_LABELS[selected.status] ?? selected.status}
               </span>
+            </div>
+
+            <div className="rounded-lg bg-slate-50 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-500">الحالة</span>
+                <span className={cn('rounded-full px-3 py-1 text-xs font-700', statusBadgeClass(selected.status))}>
+                  {STATUS_LABELS[selected.status] ?? selected.status}
+                </span>
+              </div>
             </div>
 
             <div className="space-y-2 text-sm">
