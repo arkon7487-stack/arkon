@@ -90,6 +90,22 @@ This document describes the stable backend contract that the future React Native
 - **Query**: `ratingService.getByVisit(visitId)`
 - **Create**: `ratingService.create({ visitId, clientId, employeeId, rating, comment })`
 
+### Additional/Emergency Visits
+- **Service**: `additionalVisitService` — handles creation, worker availability, and financial charges for additional/emergency visits
+- **Visit types**: `normal` (recurring), `additional` (زيارة إضافية), `emergency` (زيارة طارئة)
+- **One-time**: Additional/emergency visits are one-time only. No recurrence.
+- **Scheduling**: Uses the existing `schedulingEngine.suggestEmployees()` for conflict detection. Any overlap (even 1 minute) = unavailable.
+- **Worker assignment**: Admin selects from available workers. Workers cannot self-assign.
+- **Financial charge**: Each chargeable additional/emergency visit creates a separate invoice linked to the visit via `invoices.visit_id`. The original package/contract value is NEVER modified.
+- **Invoice charge_type**: `additional_visit` or `emergency_visit`
+- **Payment**: `record_visit_invoice_payment` RPC updates only the invoice's `amount_paid`, `remaining_balance`, `payment_status`. Does NOT touch contract-level fields.
+- **Receivables**: Additional visit invoices with `remaining_balance > 0` appear in Finance receivables alongside contract receivables.
+- **Total receivables**: `contract.remaining_balance + SUM(invoice.remaining_balance WHERE charge_type != 'contract')`
+- **QR**: Additional visits use the same QR workflow (Scheduled → Started → Completed). No QR redesign.
+- **Worker Portal**: Shows visit type badge (زيارة إضافية / زيارة طارئة) on visit cards.
+- **Customer Portal**: Shows additional visit charges with charge amount, paid, remaining, and payment status.
+- **Permissions**: Only admin/management roles can create additional visits. Workers and customers cannot self-create.
+
 ---
 
 ## REALTIME SECURITY NOTE

@@ -74,6 +74,17 @@ export const clientService = {
     return { exists: false };
   },
 
+  async search(query: string): Promise<Client[]> {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .or(`full_name.ilike.%${query}%,phone_number.ilike.%${query}%`)
+      .order('full_name', { ascending: true })
+      .limit(10);
+    if (error) throw error;
+    return (data as Client[]) ?? [];
+  },
+
   async remove(id: string): Promise<void> {
     const client = await this.get(id);
     if (!client) throw new Error('العميل غير موجود');

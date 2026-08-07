@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Wallet, Plus, Trash2, TrendingUp, TrendingDown, DollarSign,
   Receipt, Calendar, FileText, Search, Download, AlertCircle,
-  Users, CheckCircle2, Clock, Play, Sparkles, CreditCard,
+  Users, CheckCircle2, Clock, Play, Sparkles, CreditCard, CalendarPlus,
 } from 'lucide-react';
 import { expenseService, type ExpenseInput } from '@/services/expenseService';
 import { contractService } from '@/services/contractService';
@@ -14,6 +14,7 @@ import { Modal } from '@/components/Modal';
 import { ConfirmDialog, NumberInput } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
+import { VISIT_TYPE_LABELS, PAYMENT_STATUS_LABELS } from '@/lib/locale';
 
 const EXPENSE_CATEGORIES = [
   'الرواتب', 'الوقود', 'مواد التنظيف', 'المعدات', 'الصيانة',
@@ -41,6 +42,84 @@ const emptyForm: ExpenseInput = {
   title: '', category: 'متفرقات', amount: 0, payment_method: 'نقدي',
   vendor: '', description: '', receipt_url: '',
 };
+
+import { additionalVisitService } from '@/services/additionalVisitService';
+
+function AdditionalVisitReceivables() {
+  const [charges, setCharges] = useState<Array<{ visit: any; invoice: any }>>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const visits = await additionalVisitService.getAdditionalVisits();
+      const results: Array<{ visit: any; invoice: any }> = [];
+      for (const v of visits) {
+        const invoices = await additionalVisitService.getVisitInvoices(v.id);
+        if (invoices[0] && Number(invoices[0].remaining_balance ?? 0) > 0) {
+          results.push({ visit: v, invoice: invoices[0] });
+        }
+      }
+      setCharges(results);
+    } catch { /* */ } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return null;
+  if (charges.length === 0) return null;
+
+  const totalOutstanding = charges.reduce((sum, c) => sum + Number(c.invoice?.remaining_balance ?? 0), 0);
+
+  return (
+    <div className="mt-6">
+      <div className="mb-3 flex items-center gap-2">
+        <CalendarPlus size={18} className="text-brand-600" />
+        <h3 className="text-sm font-700 text-slate-900">مستحقات الزيارات الإضافية والطارئة</h3>
+        <span className="text-sm text-danger-600 font-600">{formatCurrency(totalOutstanding)}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-right text-xs font-600 text-slate-500">
+              <th className="px-4 py-3">العميل</th>
+              <th className="px-4 py-3">النوع</th>
+              <th className="px-4 py-3">التاريخ</th>
+              <th className="px-4 py-3">القيمة</th>
+              <th className="px-4 py-3">المدفوع</th>
+              <th className="px-4 py-3">المتبقي</th>
+              <th className="px-4 py-3">الحالة</th>
+            </tr>
+          </thead>
+          <tbody>
+            {charges.map(({ visit, invoice }) => (
+              <tr key={visit.id} className="border-b border-slate-100">
+                <td className="px-4 py-3 font-600 text-slate-900">{visit.contract?.client?.full_name ?? '—'}</td>
+                <td className="px-4 py-3">
+                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-600',
+                    visit.visit_type === 'emergency' ? 'bg-danger-50 text-danger-700' : 'bg-brand-50 text-brand-700')}>
+                    {VISIT_TYPE_LABELS[visit.visit_type] ?? visit.visit_type}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-600">{formatDate(visit.scheduled_date)}</td>
+                <td className="px-4 py-3 font-600 text-slate-900">{formatCurrency(invoice?.total ?? 0)}</td>
+                <td className="px-4 py-3 text-success-600">{formatCurrency(invoice?.amount_paid ?? 0)}</td>
+                <td className="px-4 py-3 font-600 text-danger-600">{formatCurrency(invoice?.remaining_balance ?? 0)}</td>
+                <td className="px-4 py-3">
+                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-600',
+                    invoice?.payment_status === 'paid' ? 'bg-success-50 text-success-700' :
+                    invoice?.payment_status === 'partially_paid' ? 'bg-warning-50 text-warning-700' : 'bg-slate-100 text-slate-600')}>
+                    {PAYMENT_STATUS_LABELS[invoice?.payment_status] ?? invoice?.payment_status ?? '—'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export function FinancePage() {
   const toast = useToast();
@@ -272,6 +351,9 @@ export function FinancePage() {
               </table>
             </div>
           )}
+
+          {/* Additional Visit Charges Receivables */}
+          <AdditionalVisitReceivables />
 
           {/* Record Payment Modal */}
           <Modal
