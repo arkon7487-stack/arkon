@@ -6,6 +6,8 @@ import type { QrWorkflowResult, ScanAction } from './types';
 function mapRpcError(message: string): string {
   if (message.includes('WRONG_QR')) return 'هذا الرمز لا يخص هذه الزيارة';
   if (message.includes('NOT_AUTHORIZED')) return 'هذه الزيارة غير مسندة إلى حسابك';
+  if (message.includes('VISIT_NOT_SCHEDULED_TODAY')) return 'لا يمكن بدء هذه الزيارة اليوم\nيمكن مسح رمز QR فقط في تاريخ الزيارة المحدد.';
+  if (message.includes('VISIT_DATE_PASSED')) return 'انتهى تاريخ هذه الزيارة ولا يمكن بدء الزيارة اليوم.';
   if (message.includes('INVALID_STATE')) return 'لا يمكن إجراء عملية على هذه الزيارة';
   return 'تعذر تحديث الزيارة، تحقق من الاتصال وحاول مرة أخرى';
 }
