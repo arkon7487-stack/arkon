@@ -80,7 +80,7 @@ function ProtectedRoute({ children, permission }: { children: React.ReactNode; p
 
   useEffect(() => {
     if (!loading && session && permission && !hasPermission(permission)) {
-      const defaultRoute = getDefaultRoute(session.permissions ?? [], session.kind);
+      const defaultRoute = getDefaultRoute(session.permissions ?? [], session.kind, session.role?.key);
       navigate(defaultRoute, { replace: true });
     }
   }, [session, loading, permission, hasPermission, navigate]);
@@ -95,7 +95,7 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
   if (loading) return null;
   if (session) {
-    const defaultRoute = getDefaultRoute(session.permissions ?? [], session.kind);
+    const defaultRoute = getDefaultRoute(session.permissions ?? [], session.kind, session.role?.key);
     return <Navigate to={defaultRoute} replace />;
   }
   return <>{children}</>;
