@@ -17,6 +17,7 @@ import { QrWorkflow } from '@/lib/qr/workflow';
 import { useVisitRealtime } from '@/lib/qr/useQrScanner';
 import { formatDate, formatDateTime, initials, cn } from '@/lib/utils';
 import { VISIT_STATUS_LABELS } from '@/lib/locale';
+import { getVisitPunctuality, formatPunctualityArabic, formatTimeInHebron } from '@/lib/punctuality';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -64,16 +65,12 @@ export function VisitsPage() {
   const handleCodeDecoded = useCallback(async (code: string) => {
     if (!scanVisit || scanPhase !== 'searching') return;
 
-    // Phase 1: QR detected
     setScanPhase('detected');
     await sleep(300);
 
-    // Phase 2: Validating
     setScanPhase('validating');
     await sleep(400);
 
-    // --- Business operation: QR validation + database update ---
-    // This is the ONLY operation that can set the error state.
     let result;
     try {
       result = await QrWorkflow.processScanForVisit(code, scanVisit);
@@ -89,7 +86,6 @@ export function VisitsPage() {
       return;
     }
 
-    // --- Database update succeeded. Success is now confirmed. ---
     setScanPhase('updating');
     await sleep(300);
 
@@ -100,8 +96,6 @@ export function VisitsPage() {
     });
     setScanPhase('success');
 
-    // --- Post-success side effects: notifications, audit, local refresh ---
-    // Failures here must NEVER reverse the confirmed success state.
     void (async () => {
       try {
         if (result.action === 'start_visit') {
@@ -117,7 +111,6 @@ export function VisitsPage() {
       try { await load(); } catch (err) { console.warn('[QR] Post-success list refresh failed:', err); }
     })();
 
-    // Close after 1.8s — success confirmation stays visible
     closeTimerRef.current = setTimeout(() => {
       setScanVisit(null);
       setScanPhase('searching');
@@ -217,6 +210,12 @@ export function VisitsPage() {
                     {v.finished_at && <span className="flex items-center gap-1"><CheckCircle2 size={12} /> انتهت {formatDateTime(v.finished_at)}</span>}
                     {(v.start_gps_lat != null) && <span className="flex items-center gap-1"><MapPin size={12} /> تم تسجيل الموقع</span>}
                     {isLocked && <span className="flex items-center gap-1 text-warning-400"><Lock size={12} /> مقفل</span>}
+                    {v.started_at && v.scheduled_start_time && (() => {
+                      const p = getVisitPunctuality(v.scheduled_date, v.scheduled_start_time, v.started_at);
+                      if (!p) return null;
+                      const cls = p.status === 'late' ? 'text-danger-500' : p.status === 'early' ? 'text-success-500' : 'text-slate-500';
+                      return <span className={cn('flex items-center gap-1 font-600', cls)}>الالتزام: {formatPunctualityArabic(p)}</span>;
+                    })()}
                   </div>
                 )}
 
@@ -239,7 +238,6 @@ export function VisitsPage() {
         </div>
       )}
 
-      {/* QR Scan Modal — uses live camera preview */}
       <Modal
         open={!!scanVisit}
         onClose={handleCloseScanModal}
@@ -257,6 +255,16 @@ export function VisitsPage() {
               <Row label="التاريخ" value={formatDate(scanVisit.scheduled_date)} />
               <Row label="الوقت" value={`${scanVisit.scheduled_start_time ?? '—'} – ${scanVisit.scheduled_end_time ?? '—'}`} />
               <Row label="الحالة" value={VISIT_STATUS_LABELS[scanVisit.status] ?? scanVisit.status} />
+              {scanVisit.started_at && (
+                <Row label="بدء فعلي" value={formatTimeInHebron(scanVisit.started_at)} />
+              )}
+              {scanVisit.finished_at && (
+                <Row label="انتهاء فعلي" value={formatTimeInHebron(scanVisit.finished_at)} />
+              )}
+              {scanVisit.started_at && scanVisit.scheduled_start_time && (() => {
+                const p = getVisitPunctuality(scanVisit.scheduled_date, scanVisit.scheduled_start_time, scanVisit.started_at);
+                return p ? <Row label="الالتزام" value={formatPunctualityArabic(p)} /> : null;
+              })()}
             </div>
           )}
           <QrScannerView
