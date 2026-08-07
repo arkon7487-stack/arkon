@@ -34,7 +34,12 @@ async function loadStaffSession(): Promise<{ session: AuthSession; permissions: 
   if (!userId) return null;
   const profile = await authService.getCurrentProfile();
   if (!profile) return null;
-  const perms = profile.role?.id ? await permissionService.getForRole(profile.role.id) : [];
+  let perms: string[] = [];
+  try {
+    perms = profile.role?.id ? await permissionService.getForRole(profile.role.id) : [];
+  } catch {
+    // RLS may block permission lookup for non-admin roles — don't let this break login
+  }
   return {
     session: { kind: 'staff', userId, profile, role: profile?.role ?? null, permissions: perms },
     permissions: perms,
