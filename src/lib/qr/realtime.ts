@@ -14,10 +14,6 @@ export type VisitChangeHandler = () => void;
 export class QrRealtimeSync {
   private channel: ReturnType<typeof supabase.channel> | null = null;
 
-  /**
-   * Subscribe to visit status changes.
-   * The handler is called whenever any visit row is inserted, updated, or deleted.
-   */
   subscribe(handler: VisitChangeHandler): void {
     this.unsubscribe();
 
@@ -63,8 +59,8 @@ export class QrRealtimeSync {
     return visitService.getByEmployee(employeeId);
   }
 
-  static async refreshClientVisits(clientId: string): Promise<VisitWithRelations[]> {
-    return visitService.getByClient(clientId);
+  static async refreshClientVisits(_clientId: string): Promise<VisitWithRelations[]> {
+    return visitService.getByClient();
   }
 }
 
