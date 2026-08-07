@@ -83,9 +83,9 @@ export const CLIENT_NAV: NavGroup[] = [
   },
 ];
 
-export function getDefaultRoute(permissions: string[], kind: 'staff' | 'client'): string {
+export function getDefaultRoute(permissions: string[], kind: 'staff' | 'client', roleKey?: string): string {
   if (kind === 'client') return '/client';
-  if (permissions.includes('worker_home')) return '/worker';
+  if (permissions.includes('worker_home') || roleKey === 'field_employee') return '/worker';
   if (permissions.includes('dashboard')) return '/dashboard';
   for (const group of STAFF_NAV) {
     for (const item of group.items) {
