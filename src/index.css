@@ -202,6 +202,14 @@ body {
   50%     { transform: translate(-10px,6px) rotate(-1deg); }
 }
 
+/* Global print styles — hide app chrome when browser print is used directly */
+@media print {
+  nav, aside, .no-print { display: none !important; }
+  body { background: #fff !important; }
+  .print-only { display: block !important; }
+}
+.print-only { display: none; }
+
 .font-arabic {
   font-family: 'Cairo', 'Inter', sans-serif;
 }
