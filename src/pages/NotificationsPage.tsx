@@ -10,7 +10,7 @@ import { useToast } from '@/components/Toast';
 import { formatDateTime, cn } from '@/lib/utils';
 
 export function NotificationsPage() {
-  const toast = useToast();
+  const { push } = useToast();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [reminders, setReminders] = useState<ContractReminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,11 +25,11 @@ export function NotificationsPage() {
       setNotifications(n);
       setReminders(computeReminders(contracts));
     } catch (err) {
-      toast.push('error', (err as Error).message);
+      push('error', (err as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [push]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -42,9 +42,9 @@ export function NotificationsPage() {
     try {
       await notificationService.markAllRead();
       await load();
-      toast.push('success', 'تم وضع علامة مقروء على جميع الإشعارات.');
+      push('success', 'تم وضع علامة مقروء على جميع الإشعارات.');
     } catch (err) {
-      toast.push('error', (err as Error).message);
+      push('error', (err as Error).message);
     }
   };
 

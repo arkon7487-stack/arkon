@@ -4,6 +4,7 @@ import {
   CalendarDays, BarChart3, ScrollText, ClipboardCheck, Receipt,
   Home, QrCode, UserCircle, CreditCard, Heart,
   Boxes, Target, Wallet, TrendingUp, CalendarPlus,
+  Inbox,
 } from 'lucide-react';
 
 export interface NavEntry {
@@ -53,6 +54,7 @@ export const STAFF_NAV: NavGroup[] = [
   {
     section: 'النظام',
     items: [
+      { to: '/support', label: 'الدعم', icon: Inbox, permission: 'notifications' },
       { to: '/notifications', label: 'الإشعارات', icon: Bell, permission: 'notifications' },
       { to: '/settings', label: 'الإعدادات', icon: Settings, permission: 'settings' },
     ],
