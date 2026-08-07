@@ -23,7 +23,6 @@ export const notificationService = {
     return (data as NotificationItem[]) ?? [];
   },
 
-  /** List notifications for a specific employee (worker scope) */
   async listForEmployee(employeeId: string): Promise<RichNotification[]> {
     const { data, error } = await supabase
       .from('notifications')
@@ -35,7 +34,6 @@ export const notificationService = {
     return (data as RichNotification[]) ?? [];
   },
 
-  /** List admin-audience notifications */
   async listForAdmin(): Promise<RichNotification[]> {
     const { data, error } = await supabase
       .from('notifications')
@@ -82,7 +80,6 @@ export const notificationService = {
     if (error) throw error;
   },
 
-  /** Mark all notifications for a specific employee as read */
   async markAllReadForEmployee(employeeId: string): Promise<void> {
     const { error } = await supabase
       .from('notifications')
@@ -92,7 +89,6 @@ export const notificationService = {
     if (error) throw error;
   },
 
-  /** Count unread notifications for a specific employee */
   async unreadCountForEmployee(employeeId: string): Promise<number> {
     const { count, error } = await supabase
       .from('notifications')
@@ -103,7 +99,6 @@ export const notificationService = {
     return count ?? 0;
   },
 
-  /** Count unread admin-audience notifications */
   async unreadCountForAdmin(): Promise<number> {
     const { count, error } = await supabase
       .from('notifications')
@@ -112,5 +107,35 @@ export const notificationService = {
       .eq('read', false);
     if (error) throw error;
     return count ?? 0;
+  },
+
+  async listForClient(): Promise<RichNotification[]> {
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('audience', 'client')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (error) throw error;
+    return (data as RichNotification[]) ?? [];
+  },
+
+  async unreadCountForClient(): Promise<number> {
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('audience', 'client')
+      .eq('read', false);
+    if (error) throw error;
+    return count ?? 0;
+  },
+
+  async markAllReadForClient(): Promise<void> {
+    const { error } = await supabase
+      .from('notifications')
+      .update({ read: true })
+      .eq('audience', 'client')
+      .neq('read', true);
+    if (error) throw error;
   },
 };
