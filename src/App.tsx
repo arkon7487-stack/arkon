@@ -23,154 +23,139 @@ const EmployeesPage = lazy(() => import('@/pages/EmployeesPage').then(m => ({ de
 const SchedulePage = lazy(() => import('@/pages/SchedulePage').then(m => ({ default: m.SchedulePage })));
 const NotificationsPage = lazy(() => import('@/pages/NotificationsPage').then(m => ({ default: m.NotificationsPage })));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const AdditionalVisitsPage = lazy(() => import('@/pages/AdditionalVisitsPage').then(m => ({ default: m.AdditionalVisitsPage })));
-const VisitsPage = lazy(() => import('@/pages/VisitsPage').then(m => ({ default: m.VisitsPage })));
-const CalendarPage = lazy(() => import('@/pages/CalendarPage').then(m => ({ default: m.CalendarPage })));
 const ReportsPage = lazy(() => import('@/pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
 const AuditPage = lazy(() => import('@/pages/AuditPage').then(m => ({ default: m.AuditPage })));
-const NewClientPage = lazy(() => import('@/pages/NewClientPage').then(m => ({ default: m.NewClientPage })));
-const InvoicesPage = lazy(() => import('@/pages/InvoicesPage').then(m => ({ default: m.InvoicesPage })));
+const CalendarPage = lazy(() => import('@/pages/CalendarPage').then(m => ({ default: m.CalendarPage })));
 const InventoryPage = lazy(() => import('@/pages/InventoryPage').then(m => ({ default: m.InventoryPage })));
+const InvoicesPage = lazy(() => import('@/pages/InvoicesPage').then(m => ({ default: m.InvoicesPage })));
+const SalesPage = lazy(() => import('@/pages/SalesPage').then(m => ({ default: m.SalesPage })));
 const OpportunitiesPage = lazy(() => import('@/pages/OpportunitiesPage').then(m => ({ default: m.OpportunitiesPage })));
 const FinancePage = lazy(() => import('@/pages/FinancePage').then(m => ({ default: m.FinancePage })));
-const SalesPage = lazy(() => import('@/pages/SalesPage').then(m => ({ default: m.SalesPage })));
+const VisitsPage = lazy(() => import('@/pages/VisitsPage').then(m => ({ default: m.VisitsPage })));
+const AdditionalVisitsPage = lazy(() => import('@/pages/AdditionalVisitsPage').then(m => ({ default: m.AdditionalVisitsPage })));
+const SupportPage = lazy(() => import('@/pages/SupportPage').then(m => ({ default: m.SupportPage })));
 const ArkonOSPage = lazy(() => import('@/pages/ArkonOSPage').then(m => ({ default: m.ArkonOSPage })));
 
-function LoadingScreen() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50">
-      <div className="flex flex-col items-center gap-4">
-        <ArkonLogo size={56} />
-        <div className="h-1 w-32 overflow-hidden rounded-full bg-slate-200">
-          <div className="h-full w-1/2 animate-shimmer rounded-full bg-brand-500" style={{ backgroundSize: '200% 100%' }} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PageLoader() {
-  return (
-    <div className="flex h-full items-center justify-center p-8">
-      <div className="flex flex-col items-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-brand-500" />
-        <span className="text-xs text-slate-400">جاري التحميل...</span>
-      </div>
-    </div>
-  );
-}
-
-function AccessDenied() {
-  return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50 px-4 text-center" dir="rtl">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-danger-50">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-danger-500">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-        </svg>
-      </div>
-      <h1 className="font-display text-xl font-700 text-slate-900">لا تملك صلاحية الوصول</h1>
-      <p className="text-sm text-slate-500">هذه الصفحة غير متاحة لدورك الوظيفي.</p>
-    </div>
-  );
-}
-
-function ProtectedRoute({ children, permission }: { children: React.ReactNode; permission?: string }) {
-  const { session, loading, hasPermission } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!loading && session && permission && !hasPermission(permission)) {
-      const defaultRoute = getDefaultRoute(session.permissions ?? [], session.kind, session.role?.key);
-      navigate(defaultRoute, { replace: true });
-    }
-  }, [session, loading, permission, hasPermission, navigate]);
-
-  if (loading) return <LoadingScreen />;
-  if (!session) return <Navigate to="/login" replace />;
-  if (permission && !hasPermission(permission)) return <AccessDenied />;
-  return <>{children}</>;
-}
-
-function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
-  const { session, loading } = useAuth();
-  if (loading) return null;
-  if (session) {
-    const defaultRoute = getDefaultRoute(session.permissions ?? [], session.kind, session.role?.key);
-    return <Navigate to={defaultRoute} replace />;
-  }
-  return <>{children}</>;
-}
-
 function LazyPage({ children }: { children: React.ReactNode }) {
-  const location = useLocation();
   return (
     <ErrorBoundary resetKey={location.pathname}>
-      <Suspense fallback={<PageLoader />}>
+      <Suspense fallback={<div className="flex h-64 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" /></div>}>
         {children}
       </Suspense>
     </ErrorBoundary>
   );
 }
 
+function ProtectedRoute({ children, permission }: { children: React.ReactNode; permission?: string }) {
+  const { session, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (loading) return;
+    if (!session) {
+      navigate('/login', { replace: true, state: { from: location.pathname } });
+      return;
+    }
+    if (permission && session.kind === 'staff') {
+      const perms = session.permissions ?? [];
+      if (!perms.includes(permission) && !perms.includes('all_access')) {
+        navigate(getDefaultRoute(perms, session.kind, session.role?.key), { replace: true });
+      }
+    }
+  }, [session, loading, navigate, permission, location.pathname]);
+
+  if (loading || !session) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+function AppRoutes() {
+  const { session, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (loading || !session) return;
+    if (location.pathname === '/' || location.pathname === '/login') {
+      navigate(getDefaultRoute(session.permissions ?? [], session.kind, session.role?.key), { replace: true });
+    }
+  }, [session, loading, navigate, location.pathname]);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/login" element={<LoginPage />} />
+
+      {/* Staff + Worker layout */}
+      <Route element={<ProtectedRoute><ErrorBoundary resetKey="staff-layout"><DashboardLayout /></ErrorBoundary></ProtectedRoute>}>
+        <Route path="/dashboard" element={<ProtectedRoute permission="dashboard"><LazyPage><DashboardPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/clients" element={<ProtectedRoute permission="clients"><LazyPage><ClientsPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/clients/:id" element={<ProtectedRoute permission="clients"><LazyPage><ClientProfilePage /></LazyPage></ProtectedRoute>} />
+        <Route path="/employees" element={<ProtectedRoute permission="employees"><LazyPage><EmployeesPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/contracts" element={<ProtectedRoute permission="contracts"><LazyPage><ContractsPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/contracts/new" element={<ProtectedRoute permission="contracts"><LazyPage><NewContractPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/contracts/:id" element={<ProtectedRoute permission="contracts"><LazyPage><ContractDetailPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/packages" element={<ProtectedRoute permission="packages"><LazyPage><PackagesPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/visits" element={<ProtectedRoute permission="visits"><LazyPage><VisitsPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/additional-visits" element={<ProtectedRoute permission="visits"><LazyPage><AdditionalVisitsPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/invoices" element={<ProtectedRoute permission="invoices"><LazyPage><InvoicesPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/schedule" element={<ProtectedRoute permission="schedule"><LazyPage><SchedulePage /></LazyPage></ProtectedRoute>} />
+        <Route path="/calendar" element={<ProtectedRoute permission="calendar"><LazyPage><CalendarPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/sales" element={<ProtectedRoute permission="sales"><LazyPage><SalesPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/inventory" element={<ProtectedRoute permission="inventory"><LazyPage><InventoryPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/opportunities" element={<ProtectedRoute permission="opportunities"><LazyPage><OpportunitiesPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/finance" element={<ProtectedRoute permission="finance"><LazyPage><FinancePage /></LazyPage></ProtectedRoute>} />
+        <Route path="/reports" element={<ProtectedRoute permission="reports"><LazyPage><ReportsPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/audit" element={<ProtectedRoute permission="audit"><LazyPage><AuditPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/support" element={<ProtectedRoute permission="notifications"><LazyPage><SupportPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/notifications" element={<ProtectedRoute permission="notifications"><LazyPage><NotificationsPage /></LazyPage></ProtectedRoute>} />
+        <Route path="/settings" element={<ProtectedRoute permission="settings"><LazyPage><SettingsPage /></LazyPage></ProtectedRoute>} />
+
+        {/* Worker routes */}
+        <Route path="/worker" element={<ProtectedRoute permission="worker_home"><WorkerHome /></ProtectedRoute>} />
+        <Route path="/worker/visits" element={<ProtectedRoute permission="worker_visits"><WorkerVisits /></ProtectedRoute>} />
+        <Route path="/worker/qr" element={<ProtectedRoute permission="worker_qr"><WorkerQr /></ProtectedRoute>} />
+        <Route path="/worker/profile" element={<ProtectedRoute permission="worker_profile"><WorkerProfile /></ProtectedRoute>} />
+        <Route path="/worker/notifications" element={<ProtectedRoute permission="worker_home"><WorkerNotifications /></ProtectedRoute>} />
+      </Route>
+
+      {/* Client portal */}
+      <Route element={<ProtectedRoute permission="client_home"><ErrorBoundary resetKey="client-layout"><ClientApp /></ErrorBoundary></ProtectedRoute>}>
+        <Route path="/client" element={<ProtectedRoute permission="client_home"><ClientHome /></ProtectedRoute>} />
+        <Route path="/client/visits" element={<ProtectedRoute permission="client_visits"><ClientVisits /></ProtectedRoute>} />
+        <Route path="/client/invoices" element={<ProtectedRoute permission="client_invoices"><ClientInvoices /></ProtectedRoute>} />
+        <Route path="/client/support" element={<ProtectedRoute permission="client_support"><ClientSupport /></ProtectedRoute>} />
+        <Route path="/client/profile" element={<ProtectedRoute permission="client_profile"><ClientProfile /></ProtectedRoute>} />
+      </Route>
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
 export default function App() {
   return (
-    <AuthProvider>
-      <ToastProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/os" element={<LazyPage><ArkonOSPage /></LazyPage>} />
-            <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
-
-            {/* Staff routes */}
-            <Route element={<ProtectedRoute><ErrorBoundary resetKey="staff-layout"><DashboardLayout /></ErrorBoundary></ProtectedRoute>}>
-              <Route path="/dashboard" element={<ProtectedRoute permission="dashboard"><LazyPage><DashboardPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/packages" element={<ProtectedRoute permission="packages"><LazyPage><PackagesPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/contracts" element={<ProtectedRoute permission="contracts"><LazyPage><ContractsPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/contracts/new" element={<ProtectedRoute permission="contracts"><LazyPage><NewContractPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/contracts/:id" element={<ProtectedRoute permission="contracts"><LazyPage><ContractDetailPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/clients" element={<ProtectedRoute permission="clients"><LazyPage><ClientsPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/clients/new" element={<ProtectedRoute permission="clients"><LazyPage><NewClientPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/clients/:id" element={<ProtectedRoute permission="clients"><LazyPage><ClientProfilePage /></LazyPage></ProtectedRoute>} />
-              <Route path="/employees" element={<ProtectedRoute permission="employees"><LazyPage><EmployeesPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/visits" element={<ProtectedRoute permission="visits"><LazyPage><VisitsPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/additional-visits" element={<ProtectedRoute permission="visits"><LazyPage><AdditionalVisitsPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/schedule" element={<ProtectedRoute permission="schedule"><LazyPage><SchedulePage /></LazyPage></ProtectedRoute>} />
-              <Route path="/calendar" element={<ProtectedRoute permission="calendar"><LazyPage><CalendarPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/reports" element={<ProtectedRoute permission="reports"><LazyPage><ReportsPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/audit" element={<ProtectedRoute permission="audit"><LazyPage><AuditPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/notifications" element={<ProtectedRoute permission="notifications"><LazyPage><NotificationsPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/invoices" element={<ProtectedRoute permission="invoices"><LazyPage><InvoicesPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/inventory" element={<ProtectedRoute permission="inventory"><LazyPage><InventoryPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/opportunities" element={<ProtectedRoute permission="opportunities"><LazyPage><OpportunitiesPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/finance" element={<ProtectedRoute permission="finance"><LazyPage><FinancePage /></LazyPage></ProtectedRoute>} />
-              <Route path="/sales" element={<ProtectedRoute permission="sales"><LazyPage><SalesPage /></LazyPage></ProtectedRoute>} />
-              <Route path="/settings" element={<ProtectedRoute permission="settings"><LazyPage><SettingsPage /></LazyPage></ProtectedRoute>} />
-            </Route>
-
-            {/* Worker mobile app */}
-            <Route element={<ProtectedRoute permission="worker_home"><ErrorBoundary resetKey="worker-layout"><WorkerApp /></ErrorBoundary></ProtectedRoute>}>
-              <Route path="/worker" element={<ProtectedRoute permission="worker_home"><WorkerHome /></ProtectedRoute>} />
-              <Route path="/worker/visits" element={<ProtectedRoute permission="worker_visits"><WorkerVisits /></ProtectedRoute>} />
-              <Route path="/worker/qr" element={<ProtectedRoute permission="worker_qr"><WorkerQr /></ProtectedRoute>} />
-              <Route path="/worker/profile" element={<ProtectedRoute permission="worker_profile"><WorkerProfile /></ProtectedRoute>} />
-              <Route path="/worker/notifications" element={<ProtectedRoute permission="worker_home"><WorkerNotifications /></ProtectedRoute>} />
-            </Route>
-
-            {/* Client mobile app */}
-            <Route element={<ProtectedRoute permission="client_home"><ErrorBoundary resetKey="client-layout"><ClientApp /></ErrorBoundary></ProtectedRoute>}>
-              <Route path="/client" element={<ProtectedRoute permission="client_home"><ClientHome /></ProtectedRoute>} />
-              <Route path="/client/visits" element={<ProtectedRoute permission="client_visits"><ClientVisits /></ProtectedRoute>} />
-              <Route path="/client/invoices" element={<ProtectedRoute permission="client_invoices"><ClientInvoices /></ProtectedRoute>} />
-              <Route path="/client/support" element={<ProtectedRoute permission="client_support"><ClientSupport /></ProtectedRoute>} />
-              <Route path="/client/profile" element={<ProtectedRoute permission="client_profile"><ClientProfile /></ProtectedRoute>} />
-            </Route>
-
-            <Route path="*" element={<Navigate to="/login" replace />} />
-          </Routes>
-        </BrowserRouter>
-      </ToastProvider>
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <ToastProvider>
+          <AppRoutes />
+        </ToastProvider>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
