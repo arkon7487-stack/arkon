@@ -39,6 +39,7 @@ function payBadgeClass(status: string): string {
     case 'paid': return 'bg-success-50 text-success-700';
     case 'partially_paid': case 'partial': return 'bg-warning-50 text-warning-700';
     case 'overdue': return 'bg-danger-50 text-danger-700';
+    case 'unpaid': case 'issued': return 'bg-danger-50 text-danger-700';
     default: return 'bg-slate-100 text-slate-600';
   }
 }

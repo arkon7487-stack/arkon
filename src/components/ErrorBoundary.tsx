@@ -36,9 +36,17 @@ export class ErrorBoundary extends Component<Props, State> {
         <p className="max-w-md text-sm text-slate-500">
           تعذّر تحميل هذه الصفحة. يرجى المحاولة مرة أخرى، وإذا استمرت المشكلة تواصل مع الدعم الفني.
         </p>
-        <button onClick={this.reset} className="btn-primary">
-          إعادة المحاولة
-        </button>
+        <div className="flex gap-2">
+          <button onClick={this.reset} className="btn-primary">
+            إعادة المحاولة
+          </button>
+          <button
+            onClick={() => { window.location.href = '/dashboard'; }}
+            className="btn-secondary"
+          >
+            العودة للوحة الرئيسية
+          </button>
+        </div>
       </div>
     );
   }

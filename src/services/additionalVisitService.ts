@@ -89,7 +89,7 @@ export const additionalVisitService = {
           charge_type: input.visitType === 'emergency' ? 'emergency_visit' : 'additional_visit',
           amount_paid: 0,
           remaining_balance: input.chargeAmount,
-          payment_status: 'issued',
+          payment_status: 'unpaid',
           visit_id: null,
           notes: input.visitType === 'emergency' ? 'زيارة طارئة' : 'زيارة إضافية',
         })

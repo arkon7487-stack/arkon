@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   Users, FileText, Package as PackageIcon, CalendarClock, TrendingUp, AlertTriangle,
   ArrowUpRight, Activity, ClipboardCheck, CheckCircle2, Clock, DollarSign, Bell,
-  BarChart3,
+  BarChart3, AlertCircle,
 } from 'lucide-react';
 import { clientService } from '@/services/clientService';
 import { contractService } from '@/services/contractService';
@@ -30,21 +30,29 @@ export function DashboardPage() {
   const [visits, setVisits] = useState<VisitWithRelations[]>([]);
   const [reminders, setReminders] = useState<ContractReminder[]>([]);
 
+  const [loadError, setLoadError] = useState(false);
+
   const load = useCallback(async () => {
+    setLoadError(false);
     try {
-      const [c, p, e, ct, v] = await Promise.all([
+      const results = await Promise.allSettled([
         clientService.list(),
         packageService.list(),
         employeeService.list(),
         contractService.list(),
         visitService.list(),
       ]);
-      setClients(c);
-      setPackages(p);
-      setEmployees(e);
-      setContracts(ct);
-      setVisits(v);
-      setReminders(computeReminders(ct));
+      const [c, p, e, ct, v] = results;
+      if (c.status === 'fulfilled') setClients(c.value); else console.error('Dashboard: clients load failed', c.reason);
+      if (p.status === 'fulfilled') setPackages(p.value); else console.error('Dashboard: packages load failed', p.reason);
+      if (e.status === 'fulfilled') setEmployees(e.value); else console.error('Dashboard: employees load failed', e.reason);
+      if (ct.status === 'fulfilled') {
+        setContracts(ct.value);
+        try { setReminders(computeReminders(ct.value)); } catch { /* */ }
+      } else { console.error('Dashboard: contracts load failed', ct.reason); }
+      if (v.status === 'fulfilled') setVisits(v.value); else console.error('Dashboard: visits load failed', v.reason);
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -65,6 +73,17 @@ export function DashboardPage() {
   }, []);
 
   if (loading) return <PageLoader label="جارٍ تحميل لوحة التحكم…" />;
+
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20 text-center" dir="rtl">
+        <AlertCircle size={40} className="text-danger-500" />
+        <h2 className="font-display text-lg font-700 text-slate-900">تعذر تحميل بعض البيانات</h2>
+        <p className="text-sm text-slate-500">يرجى المحاولة مرة أخرى</p>
+        <button onClick={() => load()} className="btn-primary">إعادة المحاولة</button>
+      </div>
+    );
+  }
 
   const activeContracts = contracts.filter((c) => c.status === 'active');
   const revenue = activeContracts.reduce((sum, c) => sum + Number(c.final_amount ?? 0), 0);
