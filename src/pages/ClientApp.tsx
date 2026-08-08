@@ -1,34 +1,36 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate, Link } from 'react-router-dom';
 import {
   Home, ClipboardCheck, CreditCard, Heart, UserCircle,
   LogOut, Phone, MapPin, Clock, Package, Send, FileText,
   Star, CheckCircle2, Wallet, Lock, Bell, AlertCircle, Calendar,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { ArkonLogo } from '@/components/ArkonLogo';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
-import { visitService } from '@/services/visitService';
-import { clientService } from '@/services/clientService';
-import { serviceRequestService } from '@/services/serviceRequestService';
-import { ratingService } from '@/services/ratingService';
-import { supabase } from '@/lib/supabase';
-import { additionalVisitService } from '@/services/additionalVisitService';
+import { customerPortalService } from '@/services/customerPortalService';
 import { notificationService } from '@/services/notificationService';
+import { clientService } from '@/services/clientService';
+import { supabase } from '@/lib/supabase';
 import { useClientNotifications } from '@/lib/notifications/useClientNotifications';
 import { PageLoader, EmptyState, Spinner } from '@/components/Feedback';
 import { useFocusRefresh } from '@/lib/useFocusRefresh';
 import { formatDate, formatTime, formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { VISIT_STATUS_LABELS, PAYMENT_STATUS_LABELS, VISIT_TYPE_LABELS } from '@/lib/locale';
-import type { VisitWithRelations, Client, ServiceRequest, VisitRating } from '@/types';
+import type { VisitWithRelations, Client, ServiceRequest } from '@/types';
 import type { RichNotification } from '@/lib/notifications/types';
 
-const ARKON_COMPANY_ID = '11111111-1111-1111-1111-111111111111';
 const POLL_INTERVAL_MS = 15000;
 
 function getTodayInHebron(): string {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Hebron' });
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Hebron',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function useLivePolling(callback: () => void, enabled: boolean): void {
@@ -72,6 +74,20 @@ function contractStatusLabel(status: string): string {
     quotation: 'عرض سعر',
   };
   return labels[status] ?? status;
+}
+
+function supportStatusLabel(status: string): string {
+  if (status === 'open') return 'مفتوح';
+  if (status === 'in_progress') return 'قيد المعالجة';
+  if (status === 'resolved') return 'تم الحل';
+  return status;
+}
+
+function supportStatusBadge(status: string): string {
+  if (status === 'open') return 'bg-brand-50 text-brand-700';
+  if (status === 'in_progress') return 'bg-warning-50 text-warning-700';
+  if (status === 'resolved') return 'bg-success-50 text-success-700';
+  return 'bg-slate-100 text-slate-600';
 }
 
 /* ===== ClientApp Layout ===== */
@@ -180,42 +196,34 @@ export function ClientHome() {
   const [contract, setContract] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showRequest, setShowRequest] = useState(false);
-
-  const clientId = session?.userId;
-  const client = session?.client as Client | null;
-  const clientName = client?.full_name ?? 'العميل';
-
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const isClient = session?.kind === 'client';
+
   const loadData = useCallback(async () => {
-    if (!clientId) { setLoading(false); return; }
+    if (!isClient) return;
     try {
       setLoadError(null);
-      const [v, inv, contracts] = await Promise.all([
-        visitService.getByClient(clientId),
-        supabase.from('invoices').select('status, contract:contracts!inner(client_id)').eq('contract.client_id', clientId).neq('status', 'paid'),
-        supabase.from('contracts').select('*, package:packages(name)').eq('client_id', clientId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      const [v, unpaid, c] = await Promise.all([
+        customerPortalService.getMyVisits(),
+        customerPortalService.getMyUnpaidInvoiceCount(),
+        customerPortalService.getMyContract(),
       ]);
-      if (inv.error) throw inv.error;
       setVisits(v);
-      setUnpaidCount(inv.data?.length ?? 0);
-      setContract(contracts.data);
+      setUnpaidCount(unpaid);
+      setContract(c);
     } catch (err) {
-      console.error('[ClientHome] Data load failed:', err);
       setLoadError((err as Error).message || 'تعذر تحميل البيانات');
     } finally { setLoading(false); }
-  }, [clientId]);
+  }, [isClient]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
 
   useFocusRefresh(loadData);
-  useLivePolling(loadData, !!clientId);
+  useLivePolling(loadData, isClient);
 
-  // Realtime: refresh when visits, contracts, or invoices change
   useEffect(() => {
-    if (!clientId) return;
+    if (!isClient) return;
     const channel = supabase.channel('client-home-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'visits' }, () => loadData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contracts' }, () => loadData())
@@ -223,7 +231,7 @@ export function ClientHome() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => loadData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [clientId, loadData]);
+  }, [isClient, loadData]);
 
   if (loading) return <PageLoader label="جاري التحميل..." />;
   if (loadError) return (
@@ -241,6 +249,7 @@ export function ClientHome() {
   const completedVisits = visits.filter((v) => v.status === 'completed');
   const remainingVisits = visits.filter((v) => v.status === 'scheduled').length;
   const packageName = contract?.package?.name ?? null;
+  const clientName = session?.client?.full_name ?? 'العميل';
 
   return (
     <div className="space-y-4 p-4" dir="rtl">
@@ -378,14 +387,14 @@ export function ClientHome() {
         طلب خدمة جديدة
       </button>
 
-      {showRequest && <ServiceRequestModal clientId={clientId!} contractId={contract?.id ?? null} onClose={() => setShowRequest(false)} />}
+      {showRequest && <ServiceRequestModal onClose={() => setShowRequest(false)} />}
     </div>
   );
 }
 
 /* ===== Service Request Modal ===== */
 
-function ServiceRequestModal({ clientId, contractId, onClose }: { clientId: string; contractId: string | null; onClose: () => void }) {
+function ServiceRequestModal({ onClose }: { onClose: () => void }) {
   const { push } = useToast();
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
@@ -396,17 +405,10 @@ function ServiceRequestModal({ clientId, contractId, onClose }: { clientId: stri
     if (!subject.trim() || !message.trim()) return;
     setSubmitting(true);
     try {
-      await serviceRequestService.create({
-        companyId: ARKON_COMPANY_ID,
-        clientId,
-        contractId,
-        subject: subject.trim(),
-        message: message.trim(),
-      });
+      await customerPortalService.createMyServiceRequest(subject.trim(), message.trim());
       push('success', 'تم إرسال طلب الدعم بنجاح');
       onClose();
     } catch (err) {
-      console.error('[ServiceRequest] Submit failed:', err);
       const msg = (err as Error).message || 'فشل إرسال الطلب';
       push('error', `فشل إرسال الطلب: ${msg}`);
     } finally { setSubmitting(false); }
@@ -445,32 +447,31 @@ export function ClientVisits() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ratingVisit, setRatingVisit] = useState<VisitWithRelations | null>(null);
+  const isClient = session?.kind === 'client';
   const clientId = session?.userId;
 
   const loadVisits = useCallback(async () => {
-    if (!clientId) { setLoading(false); return; }
+    if (!isClient) return;
     try {
       setLoadError(null);
-      setVisits(await visitService.getByClient(clientId));
+      setVisits(await customerPortalService.getMyVisits());
     } catch (err) {
-      console.error('[ClientVisits] Load failed:', err);
       setLoadError((err as Error).message || 'تعذر تحميل الزيارات');
     } finally { setLoading(false); }
-  }, [clientId]);
+  }, [isClient]);
 
   useEffect(() => { loadVisits(); }, [loadVisits]);
 
   useFocusRefresh(loadVisits);
-  useLivePolling(loadVisits, !!clientId);
+  useLivePolling(loadVisits, isClient);
 
-  // Realtime: refresh when visits change
   useEffect(() => {
-    if (!clientId) return;
+    if (!isClient) return;
     const channel = supabase.channel('client-visits-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'visits' }, () => loadVisits())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [clientId, loadVisits]);
+  }, [isClient, loadVisits]);
 
   if (loading) return <PageLoader label="جاري التحميل..." />;
   if (loadError) return (
@@ -569,10 +570,10 @@ export function ClientVisits() {
         )}
       </div>
 
-      {ratingVisit && (
+      {ratingVisit && clientId && (
         <RatingModal
           visit={ratingVisit}
-          clientId={clientId!}
+          clientId={clientId}
           onClose={() => setRatingVisit(null)}
         />
       )}
@@ -588,18 +589,17 @@ function RatingModal({ visit, clientId, onClose }: { visit: VisitWithRelations; 
   const [hover, setHover] = useState(0);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [existing, setExisting] = useState<VisitRating | null>(null);
+  const [existing, setExisting] = useState<any | null>(null);
 
   useEffect(() => {
-    ratingService.getByVisit(visit.id).then(setExisting).catch(() => {});
+    customerPortalService.getMyRatingForVisit(visit.id).then(setExisting).catch(() => {});
   }, [visit.id]);
 
   const submit = async () => {
     if (rating < 1 || rating > 5) return;
     setSubmitting(true);
     try {
-      await ratingService.create({
-        companyId: ARKON_COMPANY_ID,
+      await customerPortalService.createMyRating({
         visitId: visit.id,
         clientId,
         employeeId: visit.employee_id ?? null,
@@ -679,43 +679,38 @@ export function ClientInvoices() {
   const [contract, setContract] = useState<any>(null);
   const [visitCharges, setVisitCharges] = useState<Array<{ visit: any; invoice: any }>>([]);
   const [loading, setLoading] = useState(true);
-  const clientId = session?.userId;
+  const isClient = session?.kind === 'client';
 
   const loadData = useCallback(async () => {
-    if (!clientId) { setLoading(false); return; }
+    if (!isClient) return;
     try {
       const [inv, c, vc] = await Promise.all([
-        supabase
-          .from('invoices')
-          .select('*, contract:contracts!inner(client_id)')
-          .eq('contract.client_id', clientId)
-          .order('created_at', { ascending: false }),
-        supabase.from('contracts').select('*, package:packages(name)').eq('client_id', clientId).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-        additionalVisitService.getCustomerVisitCharges(clientId),
+        customerPortalService.getMyInvoices(),
+        customerPortalService.getMyContract(),
+        customerPortalService.getMyVisitCharges(),
       ]);
-      setInvoices((inv.data ?? []).filter((i: any) => !i.visit_id));
-      setContract(c.data);
+      setInvoices(inv);
+      setContract(c);
       setVisitCharges(vc);
     } catch (err) {
       console.error('[ClientInvoices] Load failed:', err);
     } finally { setLoading(false); }
-  }, [clientId]);
+  }, [isClient]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   useFocusRefresh(loadData);
-  useLivePolling(loadData, !!clientId);
+  useLivePolling(loadData, isClient);
 
-  // Realtime: refresh when invoices, contracts, or payments change
   useEffect(() => {
-    if (!clientId) return;
+    if (!isClient) return;
     const channel = supabase.channel('client-invoices-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices' }, () => loadData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => loadData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'contracts' }, () => loadData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [clientId, loadData]);
+  }, [isClient, loadData]);
 
   if (loading) return <PageLoader label="جاري التحميل..." />;
 
@@ -827,48 +822,41 @@ export function ClientSupport() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const { push } = useToast();
-  const clientId = session?.userId;
+  const isClient = session?.kind === 'client';
 
   const loadTickets = useCallback(async () => {
-    if (!clientId) { setLoading(false); return; }
+    if (!isClient) return;
     try {
-      setTickets(await serviceRequestService.listByClient(clientId));
+      setTickets(await customerPortalService.getMySupportRequests());
     } catch (err) {
       console.error('[ClientSupport] Load failed:', err);
     } finally { setLoading(false); }
-  }, [clientId]);
+  }, [isClient]);
 
   useEffect(() => { loadTickets(); }, [loadTickets]);
 
   useFocusRefresh(loadTickets);
-  useLivePolling(loadTickets, !!clientId);
+  useLivePolling(loadTickets, isClient);
 
-  // Realtime: refresh when service requests change
   useEffect(() => {
-    if (!clientId) return;
+    if (!isClient) return;
     const channel = supabase.channel('client-support-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'service_requests' }, () => loadTickets())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [clientId, loadTickets]);
+  }, [isClient, loadTickets]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subject.trim() || !message.trim() || !clientId) return;
+    if (!subject.trim() || !message.trim()) return;
     setSubmitting(true);
     try {
-      await serviceRequestService.create({
-        companyId: ARKON_COMPANY_ID,
-        clientId,
-        subject: subject.trim(),
-        message: message.trim(),
-      });
+      await customerPortalService.createMyServiceRequest(subject.trim(), message.trim());
       push('success', 'تم إرسال طلب الدعم');
       setSubject('');
       setMessage('');
       loadTickets();
     } catch (err) {
-      console.error('[ClientSupport] Submit failed:', err);
       const msg = (err as Error).message || 'فشل إرسال الطلب';
       push('error', `فشل إرسال الطلب: ${msg}`);
     } finally { setSubmitting(false); }
@@ -902,12 +890,8 @@ export function ClientSupport() {
               <div key={t.id} className="card p-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-600 text-slate-900">{t.subject}</p>
-                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-600',
-                    t.status === 'open' ? 'bg-warning-50 text-warning-700' :
-                    t.status === 'resolved' ? 'bg-success-50 text-success-700' :
-                    'bg-slate-100 text-slate-600'
-                  )}>
-                    {t.status === 'open' ? 'مفتوح' : t.status === 'in_progress' ? 'قيد المعالجة' : t.status === 'resolved' ? 'تم الحل' : t.status}
+                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-600', supportStatusBadge(t.status))}>
+                    {supportStatusLabel(t.status)}
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">{t.message}</p>
@@ -941,7 +925,6 @@ export function ClientProfile() {
   const [address, setAddress] = useState(client?.address ?? '');
   const [saving, setSaving] = useState(false);
 
-  // PIN change state
   const [showPinChange, setShowPinChange] = useState(false);
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -955,7 +938,6 @@ export function ClientProfile() {
       await clientService.update(client.id, { phone_number: phone, email, address });
       push('success', 'تم حفظ التغييرات');
     } catch (err) {
-      console.error('[ClientProfile] Save failed:', err);
       push('error', 'فشل الحفظ');
     } finally { setSaving(false); }
   };
