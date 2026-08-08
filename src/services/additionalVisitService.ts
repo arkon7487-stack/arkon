@@ -1,5 +1,4 @@
 import { supabase } from '@/lib/supabase';
-import { ARKON_COMPANY_ID } from '@/lib/supabase';
 import { schedulingEngine } from './schedulingEngine';
 import { invoiceService } from './invoiceService';
 import { notificationService } from './notificationService';
@@ -80,7 +79,13 @@ export const additionalVisitService = {
   },
 
   async recordPayment(invoiceId: string, amount: number, method?: string, notes?: string): Promise<unknown> {
-    const { data, error } = await supabase.rpc('record_visit_invoice_payment', { p_invoice_id: invoiceId, p_amount: amount, p_payment_method: method ?? null, p_notes: notes ?? null });
+    const { data, error } = await supabase.rpc('record_visit_invoice_payment', {
+      p_invoice_id: invoiceId,
+      p_amount: amount,
+      p_payment_method: method ?? null,
+      p_payment_date: null,
+      p_notes: notes ?? null,
+    });
     if (error) {
       const raw = `${error.message ?? ''}`;
       if (raw.includes('already_paid')) throw new Error('هذه الفاتورة مدفوعة بالكامل');
