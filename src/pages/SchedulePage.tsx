@@ -45,7 +45,10 @@ function getWeekDays(weekOffset: number): Date[] {
 }
 
 function dateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function getClientName(v: VisitWithRelations): string {
@@ -298,9 +301,9 @@ export function SchedulePage() {
                             href={`https://maps.google.com/?q=${encodeURIComponent(getClientAddress(v))}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-1 rounded-md bg-slate-50 px-2 py-1 text-[11px] font-600 text-slate-600 hover:bg-slate-100"
+                            className="flex items-center gap-1 rounded-md bg-slate-50 px-2 py-1 text-[11px] font-600 text-brand-600 hover:bg-brand-50"
                           >
-                            <Navigation size={12} /> انتقال
+                            <Navigation size={12} /> الاتجاهات
                           </a>
                         )}
                       </div>
