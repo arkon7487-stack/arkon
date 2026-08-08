@@ -1,19 +1,50 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
+  Wallet, Plus, Trash2, TrendingUp, TrendingDown, DollarSign,
+  Receipt, Calendar, FileText, Search, Download, AlertCircle,
   Users, CheckCircle2, Clock, Play, Sparkles, CreditCard, CalendarPlus,
-  TrendingUp, Wallet, AlertCircle, Receipt, DollarSign, Download, FileText, Trash2,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { expenseService, type ExpenseInput } from '@/services/expenseService';
+import { contractService } from '@/services/contractService';
+import { payrollService, type PayrollInput } from '@/services/payrollService';
 import { contractPaymentService } from '@/services/contractPaymentService';
-import { additionalVisitService } from '@/services/additionalVisitService';
-import { payrollService } from '@/services/payrollService';
-import { expenseService } from '@/services/expenseService';
-import { useToast } from '@/components/Toast';
+import { invoiceService } from '@/services/invoiceService';
+import type { Expense, ContractWithRelations, Payroll, InvoiceWithRelations } from '@/types';
 import { PageLoader, EmptyState } from '@/components/Feedback';
-import { Modal, NumberInput, ConfirmDialog } from '@/components/ui';
+import { Modal } from '@/components/Modal';
+import { ConfirmDialog, NumberInput } from '@/components/ui';
+import { useToast } from '@/components/Toast';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
-import { PAYMENT_STATUS_LABELS } from '@/lib/locale';
-import type { ContractWithRelations, Expense, PayrollWithRelations } from '@/types';
+import { VISIT_TYPE_LABELS, PAYMENT_STATUS_LABELS } from '@/lib/locale';
+
+const EXPENSE_CATEGORIES = [
+  'الرواتب', 'الوقود', 'مواد التنظيف', 'المعدات', 'الصيانة',
+  'المرافق', 'مصاريف المكتب', 'التسويق', 'النقل', 'متفرقات',
+];
+
+const PAYMENT_METHODS = ['نقدي', 'تحويل بنكي', 'شيك', 'بطاقة ائتمانية'];
+
+function payBadge(status: string) {
+  switch (status) {
+    case 'paid': return 'bg-success-50 text-success-700';
+    case 'partial': return 'bg-warning-50 text-warning-700';
+    case 'overdue': return 'bg-danger-50 text-danger-700';
+    default: return 'bg-slate-100 text-slate-600';
+  }
+}
+
+function payLabel(status: string) {
+  return status === 'paid' ? 'مدفوع' : status === 'partial' ? 'مدفوع جزئياً' : status === 'overdue' ? 'متأخر' : 'غير مدفوع';
+}
+
+type Tab = 'dashboard' | 'expenses' | 'receivables' | 'payroll' | 'reports';
+
+const emptyForm: ExpenseInput = {
+  title: '', category: 'متفرقات', amount: 0, payment_method: 'نقدي',
+  vendor: '', description: '', receipt_url: '',
+};
+
+import { additionalVisitService } from '@/services/additionalVisitService';
 
 function toUserMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
@@ -23,9 +54,6 @@ function toUserMessage(err: unknown): string {
   if (msg.includes('not_authorized')) return 'لا تملك صلاحية تسجيل الدفعات';
   return msg || 'تعذر تسجيل الدفعة. يرجى المحاولة مرة أخرى.';
 }
-
-const EXPENSE_CATEGORIES = ['رواتب', 'إيجار', 'مواد', 'صيانة', 'نقل', 'تسويق', 'ضيافة', 'أخرى'];
-const PAYMENT_METHODS = ['نقدي', 'تحويل بنكي', 'شيك', 'بطاقة ائتمان'];
 
 function AdditionalVisitReceivables() {
   const toast = useToast();
@@ -39,114 +67,93 @@ function AdditionalVisitReceivables() {
     setLoading(true);
     try {
       const visits = await additionalVisitService.getAdditionalVisits();
-      const result: Array<{ visit: any; invoice: any }> = [];
+      const results: Array<{ visit: any; invoice: any }> = [];
       for (const v of visits) {
         const invoices = await additionalVisitService.getVisitInvoices(v.id);
-        if (invoices.length > 0) {
-          result.push({ visit: v, invoice: invoices[0] });
+        if (invoices[0] && Number(invoices[0].remaining_balance ?? 0) > 0) {
+          results.push({ visit: v, invoice: invoices[0] });
         }
       }
-      setCharges(result);
-    } catch (err) {
-      toast.push('error', (err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
+      setCharges(results);
+    } catch { /* */ } finally { setLoading(false); }
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const unpaidCharges = charges.filter(
-    ({ invoice }) => Number(invoice?.remaining_balance ?? 0) > 0 && invoice?.payment_status !== 'paid',
-  );
+  if (loading) return null;
+  if (charges.length === 0) return null;
 
-  if (loading) return <PageLoader label="جارٍ تحميل المستحقات…" />;
+  const totalOutstanding = charges.reduce((sum, c) => sum + Number(c.invoice?.remaining_balance ?? 0), 0);
 
   return (
-    <>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="font-display text-lg font-700 text-slate-900">مستحقات الزيارات الإضافية والطارئة</h2>
-          <p className="mt-0.5 text-sm text-slate-500">الدفعات المستحقة على الزيارات الإضافية والطارئة</p>
-        </div>
+    <div className="mt-6">
+      <div className="mb-3 flex items-center gap-2">
+        <CalendarPlus size={18} className="text-brand-600" />
+        <h3 className="text-sm font-700 text-slate-900">مستحقات الزيارات الإضافية والطارئة</h3>
+        <span className="text-sm text-danger-600 font-600">{formatCurrency(totalOutstanding)}</span>
       </div>
-
-      {unpaidCharges.length === 0 ? (
-        <div className="card">
-          <EmptyState icon={<CalendarPlus size={32} />} title="لا توجد مستحقات" description="جميع الزيارات الإضافية مدفوعة." />
-        </div>
-      ) : (
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-xs text-slate-500">
-                  <th className="px-4 py-3 text-right font-600">العميل</th>
-                  <th className="px-4 py-3 text-right font-600">النوع</th>
-                  <th className="px-4 py-3 text-right font-600">التاريخ</th>
-                  <th className="px-4 py-3 text-right font-600">المبلغ</th>
-                  <th className="px-4 py-3 text-right font-600">المدفوع</th>
-                  <th className="px-4 py-3 text-right font-600">المتبقي</th>
-                  <th className="px-4 py-3 text-right font-600">الحالة</th>
-                  <th className="px-4 py-3 text-right font-600">إجراء</th>
-                </tr>
-              </thead>
-              <tbody>
-                {unpaidCharges.map(({ visit, invoice }) => {
-                  const clientName = visit?.contract?.client?.full_name ?? '—';
-                  const visitType = visit?.visit_type === 'emergency' ? 'زيارة طارئة' : 'زيارة إضافية';
-                  const remaining = Number(invoice?.remaining_balance ?? 0);
-                  const paid = Number(invoice?.amount_paid ?? 0);
-                  const total = Number(invoice?.total ?? 0);
-                  const status = invoice?.payment_status ?? 'unpaid';
-                  return (
-                    <tr key={visit.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                      <td className="px-4 py-3 font-600 text-slate-900">{clientName}</td>
-                      <td className="px-4 py-3 text-slate-600">{visitType}</td>
-                      <td className="px-4 py-3 text-slate-600">{formatDate(visit?.scheduled_date)}</td>
-                      <td className="px-4 py-3 font-600 text-slate-900">{formatCurrency(total)}</td>
-                      <td className="px-4 py-3 text-success-600 font-600">{formatCurrency(paid)}</td>
-                      <td className="px-4 py-3 text-danger-600 font-600">{formatCurrency(remaining)}</td>
-                      <td className="px-4 py-3">
-                        <span className={cn(
-                          'rounded-full px-2.5 py-0.5 text-xs font-600',
-                          status === 'paid' ? 'bg-success-50 text-success-700' :
-                          status === 'partially_paid' ? 'bg-warning-50 text-warning-700' :
-                          'bg-danger-50 text-danger-700',
-                        )}>
-                          {PAYMENT_STATUS_LABELS[status] ?? status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {remaining > 0 && status !== 'paid' ? (
-                          <button
-                            onClick={() => { setPaymentTarget({ visit, invoice }); setPaymentAmount(''); }}
-                            className="rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-600 text-brand-700 hover:bg-brand-100"
-                          >تسجيل دفعة</button>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-lg bg-success-50 px-2.5 py-1.5 text-xs font-600 text-success-700">
-                            <CheckCircle2 size={12} /> تم الدفع
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-right text-xs font-600 text-slate-500">
+              <th className="px-4 py-3">العميل</th>
+              <th className="px-4 py-3">النوع</th>
+              <th className="px-4 py-3">التاريخ</th>
+              <th className="px-4 py-3">القيمة</th>
+              <th className="px-4 py-3">المدفوع</th>
+              <th className="px-4 py-3">المتبقي</th>
+              <th className="px-4 py-3">الحالة</th>
+              <th className="px-4 py-3">إجراء</th>
+            </tr>
+          </thead>
+          <tbody>
+            {charges.map(({ visit, invoice }) => (
+              <tr key={visit.id} className="border-b border-slate-100">
+                <td className="px-4 py-3 font-600 text-slate-900">{visit.contract?.client?.full_name ?? '—'}</td>
+                <td className="px-4 py-3">
+                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-600',
+                    visit.visit_type === 'emergency' ? 'bg-danger-50 text-danger-700' : 'bg-brand-50 text-brand-700')}>
+                    {VISIT_TYPE_LABELS[visit.visit_type] ?? visit.visit_type}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-slate-600">{formatDate(visit.scheduled_date)}</td>
+                <td className="px-4 py-3 font-600 text-slate-900">{formatCurrency(invoice?.total ?? 0)}</td>
+                <td className="px-4 py-3 text-success-600">{formatCurrency(invoice?.amount_paid ?? 0)}</td>
+                <td className="px-4 py-3 font-600 text-danger-600">{formatCurrency(invoice?.remaining_balance ?? 0)}</td>
+                <td className="px-4 py-3">
+                  <span className={cn('rounded-full px-2 py-0.5 text-xs font-600',
+                    invoice?.payment_status === 'paid' ? 'bg-success-50 text-success-700' :
+                    invoice?.payment_status === 'partially_paid' ? 'bg-warning-50 text-warning-700' : 'bg-slate-100 text-slate-600')}>
+                    {PAYMENT_STATUS_LABELS[invoice?.payment_status] ?? invoice?.payment_status ?? '—'}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  {Number(invoice?.remaining_balance ?? 0) > 0 && invoice?.payment_status !== 'paid' ? (
+                    <button
+                      onClick={() => { setPaymentTarget({ visit, invoice }); setPaymentAmount(''); }}
+                      className="rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-600 text-brand-700 hover:bg-brand-100"
+                    >تسجيل دفعة</button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-success-50 px-2.5 py-1.5 text-xs font-600 text-success-700">
+                      <CheckCircle2 size={12} /> تم الدفع
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <Modal
         open={!!paymentTarget}
         onClose={() => setPaymentTarget(null)}
-        title="تسجيل دفعة - زيارة إضافية"
+        title="تسجيل دفعة للزيارة"
         size="sm"
         footer={
           <>
             <button onClick={() => setPaymentTarget(null)} className="btn-ghost">إلغاء</button>
             <button
+              disabled={recordingPayment || !paymentAmount}
               onClick={async () => {
                 if (!paymentTarget || !paymentAmount) return;
                 const amount = Number(paymentAmount);
@@ -172,163 +179,125 @@ function AdditionalVisitReceivables() {
                   setRecordingPayment(false);
                 }
               }}
-              disabled={recordingPayment || !paymentAmount}
               className="btn-primary"
-            >
-              {recordingPayment ? 'جارٍ التسجيل…' : 'تسجيل الدفعة'}
-            </button>
+            >{recordingPayment ? 'جارٍ التسجيل…' : 'تسجيل الدفعة'}</button>
           </>
         }
       >
-        {paymentTarget && (
-          <div className="space-y-4" dir="rtl">
-            <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-slate-500">العميل</span><span className="font-600">{paymentTarget.visit?.contract?.client?.full_name ?? '—'}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">إجمالي الفاتورة</span><span className="font-600">{formatCurrency(Number(paymentTarget.invoice.total ?? 0))}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">المدفوع سابقاً</span><span className="font-600 text-success-600">{formatCurrency(Number(paymentTarget.invoice.amount_paid ?? 0))}</span></div>
-              <div className="flex justify-between border-t border-slate-200 pt-2"><span className="text-slate-700 font-600">المتبقي</span><span className="font-700 text-danger-600">{formatCurrency(Number(paymentTarget.invoice.remaining_balance ?? 0))}</span></div>
-            </div>
-            <NumberInput
-              label="المبلغ المدفوع *"
-              value={paymentAmount ? Number(paymentAmount) : undefined}
-              onChange={(v) => setPaymentAmount(v != null ? String(v) : '')}
-              min={0.01}
-              step={0.01}
-              placeholder="0.00"
-              required
-              prefix="₪"
-            />
-          </div>
-        )}
+        <NumberInput
+          label="المبلغ المدفوع *"
+          value={paymentAmount ? Number(paymentAmount) : undefined}
+          onChange={(value) => setPaymentAmount(value == null ? '' : String(value))}
+          min={0.01}
+          step={0.01}
+          prefix="₪"
+          required
+        />
       </Modal>
-    </>
+    </div>
   );
 }
 
 export function FinancePage() {
   const toast = useToast();
-  const [tab, setTab] = useState<'overview' | 'receivables' | 'payroll' | 'expenses' | 'reports'>('overview');
-  const [contracts, setContracts] = useState<ContractWithRelations[]>([]);
-  const [payroll, setPayroll] = useState<PayrollWithRelations[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [contracts, setContracts] = useState<ContractWithRelations[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceWithRelations[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>('dashboard');
+  const [query, setQuery] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState<ExpenseInput>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<Expense | null>(null);
+  const [payroll, setPayroll] = useState<Payroll[]>([]);
   const [payrollMonth, setPayrollMonth] = useState(new Date().toISOString().slice(0, 7));
   const [generatingPayroll, setGeneratingPayroll] = useState(false);
   const [payingId, setPayingId] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [confirmTarget, setConfirmTarget] = useState<Expense | null>(null);
-  const [form, setForm] = useState({ title: '', category: 'رواتب', amount: 0, payment_method: 'نقدي', vendor: '', receipt_url: '', description: '' });
   const [paymentTarget, setPaymentTarget] = useState<ContractWithRelations | null>(null);
-  const [recordingPayment, setRecordingPayment] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ amount: '', payment_method: 'نقدي', payment_date: new Date().toISOString().slice(0, 10), notes: '' });
+  const [recordingPayment, setRecordingPayment] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     setLoading(true);
     try {
-      const [contractsResult, payrollResult, expensesResult] = await Promise.all([
-        supabase.from('contracts').select('*, client:clients(*), package:packages(*), employee:employees(*)').order('created_at', { ascending: false }),
-        supabase.from('payroll').select('*, employee:employees(*)').order('salary_month', { ascending: false }),
-        supabase.from('expenses').select('*').order('created_at', { ascending: false }),
-      ]);
-      if (contractsResult.error) throw contractsResult.error;
-      if (payrollResult.error) throw payrollResult.error;
-      if (expensesResult.error) throw expensesResult.error;
-      setContracts((contractsResult.data as ContractWithRelations[]) ?? []);
-      setPayroll((payrollResult.data as PayrollWithRelations[]) ?? []);
-      setExpenses((expensesResult.data as Expense[]) ?? []);
-    } catch (err) {
-      toast.push('error', (err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
+      const [exp, con, pr, inv] = await Promise.all([expenseService.list(), contractService.list(), payrollService.list(), invoiceService.list()]);
+      setExpenses(exp); setContracts(con); setPayroll(pr); setInvoices(inv);
+    } catch (err) { toast.push('error', (err as Error).message); }
+    finally { setLoading(false); }
+  };
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, []);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      const { error } = await supabase.from('expenses').insert({
-        title: form.title,
-        category: form.category,
-        amount: form.amount,
-        payment_method: form.payment_method,
-        vendor: form.vendor || null,
-        receipt_url: form.receipt_url || null,
-        description: form.description || null,
-      });
-      if (error) throw error;
-      toast.push('success', 'تم تسجيل المصروف بنجاح');
-      setModalOpen(false);
-      setForm({ title: '', category: 'رواتب', amount: 0, payment_method: 'نقدي', vendor: '', receipt_url: '', description: '' });
-      await load();
-    } catch (err) {
-      toast.push('error', (err as Error).message);
-    } finally {
-      setSaving(false);
-    }
+      await expenseService.create(form);
+      toast.push('success', 'تم تسجيل المصروف');
+      setModalOpen(false); setForm({ ...emptyForm }); await load();
+    } catch (err) { toast.push('error', (err as Error).message); }
+    finally { setSaving(false); }
   };
 
   const confirmDelete = async () => {
     if (!confirmTarget) return;
-    try {
-      const { error } = await supabase.from('expenses').delete().eq('id', confirmTarget.id);
-      if (error) throw error;
-      toast.push('success', 'تم حذف المصروف');
-      setConfirmTarget(null);
-      await load();
-    } catch (err) {
-      toast.push('error', (err as Error).message);
-    }
+    try { await expenseService.remove(confirmTarget.id); toast.push('success', 'تم حذف المصروف'); await load(); }
+    catch (err) { toast.push('error', (err as Error).message); }
+    finally { setConfirmTarget(null); }
   };
+
+  const visitInvoices = invoices.filter((i) => i.charge_type === 'additional_visit' || i.charge_type === 'emergency_visit');
+  const visitInvoiceRevenue = visitInvoices.reduce((s, i) => s + Number(i.total ?? 0), 0);
+  const visitInvoiceCollected = visitInvoices.reduce((s, i) => s + Number(i.amount_paid ?? 0), 0);
+  const visitInvoiceOutstanding = visitInvoices.reduce((s, i) => s + Number(i.remaining_balance ?? 0), 0);
+
+  const totalRevenue = contracts.filter((c) => c.status === 'active').reduce((s, c) => s + Number(c.final_amount ?? 0), 0) + visitInvoiceRevenue;
+  const totalCollected = contracts.reduce((s, c) => s + (Number(c.final_amount ?? 0) - Number(c.remaining_balance ?? 0)), 0) + visitInvoiceCollected;
+  const totalOutstanding = contracts.reduce((s, c) => s + Number(c.remaining_balance ?? 0), 0) + visitInvoiceOutstanding;
+  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+  const netProfit = totalCollected - totalExpenses;
+  const totalCollectedReal = contracts.reduce((s, c) => s + Number(c.amount_paid ?? 0), 0) + visitInvoiceCollected;
+  const paidContracts = contracts.filter((c) => c.payment_status === 'fully_paid' || c.payment_status === 'paid').length;
+  const partialContracts = contracts.filter((c) => c.payment_status === 'partially_paid' || c.payment_status === 'partial').length;
+  const unpaidContracts = contracts.filter((c) => c.payment_status === 'unpaid').length;
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthlyExpenses = expenses.filter((e) => e.expense_date.startsWith(monthKey)).reduce((s, e) => s + e.amount, 0);
+  const byCategory: Record<string, number> = {};
+  for (const e of expenses) { byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount; }
+  const filteredExpenses = expenses.filter((e) =>
+    !query || e.title.toLowerCase().includes(query.toLowerCase()) || e.category.includes(query) || (e.vendor ?? '').includes(query)
+  );
+  const filteredReceivables = contracts.filter((c) =>
+    c.payment_status !== 'paid' && (!query || (c.contract_number ?? '').includes(query) || (c.client?.full_name ?? '').includes(query))
+  );
 
   if (loading) return <PageLoader label="جارٍ تحميل البيانات المالية…" />;
 
-  const totalRevenue = contracts.reduce((sum, c) => sum + Number(c.final_amount ?? 0), 0);
-  const totalReceived = contracts.reduce((sum, c) => sum + Number(c.amount_paid ?? 0), 0);
-  const totalOutstanding = contracts.reduce((sum, c) => sum + Number(c.remaining_balance ?? 0), 0);
-  const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount ?? 0), 0);
-  const netProfit = totalReceived - totalExpenses;
-  const activeContracts = contracts.filter((c) => c.status === 'active');
-  const unpaidContracts = contracts.filter((c) => Number(c.remaining_balance ?? 0) > 0 && c.payment_status !== 'fully_paid' && c.payment_status !== 'paid');
-
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="font-display text-2xl font-700 text-slate-900">الإدارة المالية</h1>
-        <p className="mt-1 text-sm text-slate-500">إدارة المصروفات والمستحقات والتقارير المالية</p>
+    <div className="space-y-6 animate-fade-in" dir="rtl">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-700 text-slate-900">الإدارة المالية</h1>
+          <p className="mt-1 text-sm text-slate-500">المركز المالي للشركة — الإيرادات والمصروفات والمستحقات</p>
+        </div>
+        <button onClick={() => setModalOpen(true)} className="btn-primary"><Plus size={16} /> تسجيل مصروف</button>
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-slate-200">
-        {[
-          { key: 'overview', label: 'نظرة عامة' },
-          { key: 'receivables', label: 'المستحقات' },
-          { key: 'payroll', label: 'الرواتب' },
-          { key: 'expenses', label: 'المصروفات' },
-          { key: 'reports', label: 'التقارير' },
-        ].map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key as typeof tab)}
-            className={cn(
-              'px-4 py-2 text-sm font-600 transition border-b-2 -mb-px',
-              tab === t.key ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700',
-            )}
-          >
-            {t.label}
-          </button>
+      <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+        {([['dashboard', 'لوحة المعلومات'], ['expenses', 'المصروفات'], ['receivables', 'المستحقات'], ['payroll', 'الرواتب الشهرية'], ['reports', 'التقارير']] as [Tab, string][]).map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} className={cn('flex-1 rounded-lg py-2 text-sm font-600 transition', tab === key ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>{label}</button>
         ))}
       </div>
 
-      {tab === 'overview' && (
+      {tab === 'dashboard' && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-brand-50 p-2.5 text-brand-600"><TrendingUp size={20} /></div><div><p className="text-xs text-slate-500">إجمالي الإيرادات</p><p className="font-700 text-lg text-slate-900">{formatCurrency(totalRevenue)}</p></div></div></div>
-          <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-success-50 p-2.5 text-success-600"><DollarSign size={20} /></div><div><p className="text-xs text-slate-500">المحصل</p><p className="font-700 text-lg text-slate-900">{formatCurrency(totalReceived)}</p></div></div></div>
+          <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-brand-50 p-2.5 text-brand-600"><TrendingUp size={20} /></div><div><p className="text-xs text-slate-500">الإيرادات الإجمالية</p><p className="font-700 text-lg text-slate-900">{formatCurrency(totalRevenue)}</p></div></div></div>
+          <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-success-50 p-2.5 text-success-600"><DollarSign size={20} /></div><div><p className="text-xs text-slate-500">الإيرادات المحصلة فعليًا</p><p className="font-700 text-lg text-slate-900">{formatCurrency(totalCollectedReal)}</p></div></div></div>
           <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-danger-50 p-2.5 text-danger-600"><AlertCircle size={20} /></div><div><p className="text-xs text-slate-500">المستحقات</p><p className="font-700 text-lg text-slate-900">{formatCurrency(totalOutstanding)}</p></div></div></div>
           <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-warning-50 p-2.5 text-warning-600"><Wallet size={20} /></div><div><p className="text-xs text-slate-500">صافي الربح</p><p className="font-700 text-lg text-slate-900">{formatCurrency(netProfit)}</p></div></div></div>
-          <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-slate-100 p-2.5 text-slate-600"><FileText size={20} /></div><div><p className="text-xs text-slate-500">عقود نشطة</p><p className="font-700 text-lg text-slate-900">{activeContracts.length}</p></div></div></div>
+          <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-slate-100 p-2.5 text-slate-600"><FileText size={20} /></div><div><p className="text-xs text-slate-500">عقود نشطة</p><p className="font-700 text-lg text-slate-900">{contracts.filter((c) => c.status === 'active').length}</p></div></div></div>
           <div className="card p-5"><div className="flex items-center gap-3"><div className="rounded-xl bg-brand-50 p-2.5 text-brand-600"><Receipt size={20} /></div><div><p className="text-xs text-slate-500">مصروفات</p><p className="font-700 text-lg text-slate-900">{formatCurrency(totalExpenses)}</p></div></div></div>
         </div>
       )}
@@ -339,55 +308,37 @@ export function FinancePage() {
             <h2 className="font-display text-lg font-700 text-slate-900">مستحقات العقود</h2>
             <p className="mt-0.5 text-sm text-slate-500">الدفعات المستحقة على العقود</p>
           </div>
-          {unpaidContracts.length === 0 ? (
+          {filteredReceivables.length === 0 ? (
             <div className="card"><EmptyState icon={<CheckCircle2 size={32} />} title="لا توجد مستحقات" description="جميع العقود مدفوعة بالكامل." /></div>
           ) : (
             <div className="card overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-200 text-xs text-slate-500">
-                      <th className="px-4 py-3 text-right font-600">العميل</th>
-                      <th className="px-4 py-3 text-right font-600">العقد</th>
-                      <th className="px-4 py-3 text-right font-600">القيمة</th>
-                      <th className="px-4 py-3 text-right font-600">المدفوع</th>
-                      <th className="px-4 py-3 text-right font-600">المتبقي</th>
-                      <th className="px-4 py-3 text-right font-600">الحالة</th>
-                      <th className="px-4 py-3 text-right font-600">إجراء</th>
+                    <tr className="border-b border-slate-200 text-right text-xs font-600 text-slate-500">
+                      <th className="px-4 py-3">العميل</th>
+                      <th className="px-4 py-3">العقد</th>
+                      <th className="px-4 py-3">القيمة</th>
+                      <th className="px-4 py-3">المدفوع</th>
+                      <th className="px-4 py-3">المتبقي</th>
+                      <th className="px-4 py-3">الحالة</th>
+                      <th className="px-4 py-3">إجراء</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {unpaidContracts.map((c) => (
-                      <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                    {filteredReceivables.map((c) => (
+                      <tr key={c.id} className="border-b border-slate-100">
                         <td className="px-4 py-3 font-600 text-slate-900">{c.client?.full_name ?? '—'}</td>
                         <td className="px-4 py-3 text-slate-600">{c.contract_number}</td>
                         <td className="px-4 py-3 font-600 text-slate-900">{formatCurrency(Number(c.final_amount ?? 0))}</td>
                         <td className="px-4 py-3 text-success-600 font-600">{formatCurrency(Number(c.amount_paid ?? 0))}</td>
                         <td className="px-4 py-3 text-danger-600 font-600">{formatCurrency(Number(c.remaining_balance ?? 0))}</td>
-                        <td className="px-4 py-3">
-                          <span className={cn(
-                            'rounded-full px-2.5 py-0.5 text-xs font-600',
-                            c.payment_status === 'fully_paid' ? 'bg-success-50 text-success-700' :
-                            c.payment_status === 'partially_paid' ? 'bg-warning-50 text-warning-700' :
-                            'bg-danger-50 text-danger-700',
-                          )}>
-                            {c.payment_status === 'fully_paid' ? 'مدفوع بالكامل' :
-                             c.payment_status === 'partially_paid' ? 'مدفوع جزئياً' :
-                             'غير مدفوع'}
-                          </span>
-                        </td>
+                        <td className="px-4 py-3"><span className={cn('rounded-full px-2 py-0.5 text-xs font-600', payBadge(c.payment_status))}>{payLabel(c.payment_status)}</span></td>
                         <td className="px-4 py-3">
                           {Number(c.remaining_balance ?? 0) > 0 && c.payment_status !== 'fully_paid' && c.payment_status !== 'paid' ? (
-                            <button
-                              onClick={() => { setPaymentTarget(c); setPaymentForm({ amount: '', payment_method: 'نقدي', payment_date: new Date().toISOString().slice(0, 10), notes: '' }); }}
-                              className="flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-600 text-brand-700 hover:bg-brand-100 transition"
-                            >
-                              <CreditCard size={12} /> تسجيل دفعة
-                            </button>
+                            <button onClick={() => { setPaymentTarget(c); setPaymentForm({ amount: '', payment_method: 'نقدي', payment_date: new Date().toISOString().slice(0, 10), notes: '' }); }} className="flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-600 text-brand-700 hover:bg-brand-100"><CreditCard size={12} /> تسجيل دفعة</button>
                           ) : (
-                            <span className="inline-flex items-center gap-1 rounded-lg bg-success-50 px-2.5 py-1.5 text-xs font-600 text-success-700">
-                              <CheckCircle2 size={12} /> تم الدفع
-                            </span>
+                            <span className="inline-flex items-center gap-1 rounded-lg bg-success-50 px-2.5 py-1.5 text-xs font-600 text-success-700"><CheckCircle2 size={12} /> تم الدفع</span>
                           )}
                         </td>
                       </tr>
@@ -432,9 +383,7 @@ export function FinancePage() {
                     finally { setRecordingPayment(false); }
                   }}
                   className="btn-primary"
-                >
-                  {recordingPayment ? 'جارٍ التسجيل…' : 'تسجيل الدفعة'}
-                </button>
+                >{recordingPayment ? 'جارٍ التسجيل…' : 'تسجيل الدفعة'}</button>
               </>
             }
           >
@@ -517,14 +466,14 @@ export function FinancePage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-xs text-slate-500">
-                    <th className="px-4 py-3 text-right font-600">الموظف</th>
-                    <th className="px-4 py-3 text-right font-600">المسمى الوظيفي</th>
-                    <th className="px-4 py-3 text-right font-600">الراتب</th>
-                    <th className="px-4 py-3 text-right font-600">الشهر</th>
-                    <th className="px-4 py-3 text-right font-600">تاريخ الاستحقاق</th>
-                    <th className="px-4 py-3 text-right font-600">الحالة</th>
-                    <th className="px-4 py-3 text-right font-600">إجراءات</th>
+                  <tr className="border-b border-slate-200 text-right text-xs font-600 text-slate-500">
+                    <th className="px-4 py-3">الموظف</th>
+                    <th className="px-4 py-3">المسمى الوظيفي</th>
+                    <th className="px-4 py-3">الراتب</th>
+                    <th className="px-4 py-3">الشهر</th>
+                    <th className="px-4 py-3">تاريخ الاستحقاق</th>
+                    <th className="px-4 py-3">الحالة</th>
+                    <th className="px-4 py-3">إجراءات</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -589,32 +538,32 @@ export function FinancePage() {
             <h2 className="font-display text-lg font-700 text-slate-900">المصروفات</h2>
             <button onClick={() => setModalOpen(true)} className="btn-primary"><Receipt size={16} /> تسجيل مصروف</button>
           </div>
-          {expenses.length === 0 ? (
+          {filteredExpenses.length === 0 ? (
             <div className="card"><EmptyState icon={<Receipt size={32} />} title="لا توجد مصروفات" description="اضغط تسجيل مصروف لإضافة مصروف جديد." /></div>
           ) : (
             <div className="card overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-200 text-xs text-slate-500">
-                      <th className="px-4 py-3 text-right font-600">العنوان</th>
-                      <th className="px-4 py-3 text-right font-600">التصنيف</th>
-                      <th className="px-4 py-3 text-right font-600">المبلغ</th>
-                      <th className="px-4 py-3 text-right font-600">طريقة الدفع</th>
-                      <th className="px-4 py-3 text-right font-600">المورد</th>
-                      <th className="px-4 py-3 text-right font-600">التاريخ</th>
-                      <th className="px-4 py-3 text-right font-600">إجراءات</th>
+                    <tr className="border-b border-slate-200 text-right text-xs font-600 text-slate-500">
+                      <th className="px-4 py-3">العنوان</th>
+                      <th className="px-4 py-3">التصنيف</th>
+                      <th className="px-4 py-3">المبلغ</th>
+                      <th className="px-4 py-3">طريقة الدفع</th>
+                      <th className="px-4 py-3">المورد</th>
+                      <th className="px-4 py-3">التاريخ</th>
+                      <th className="px-4 py-3">إجراءات</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {expenses.map((e) => (
+                    {filteredExpenses.map((e) => (
                       <tr key={e.id} className="border-b border-slate-100 hover:bg-slate-50">
                         <td className="px-4 py-3 font-600 text-slate-900">{e.title}</td>
                         <td className="px-4 py-3 text-slate-600">{e.category}</td>
                         <td className="px-4 py-3 font-700 text-slate-900">{formatCurrency(Number(e.amount))}</td>
                         <td className="px-4 py-3 text-slate-600">{e.payment_method ?? '—'}</td>
                         <td className="px-4 py-3 text-slate-600">{e.vendor ?? '—'}</td>
-                        <td className="px-4 py-3 text-slate-600">{formatDate(e.created_at)}</td>
+                        <td className="px-4 py-3 text-slate-600">{formatDate(e.expense_date)}</td>
                         <td className="px-4 py-3">
                           <button onClick={() => setConfirmTarget(e)} className="text-danger-600 hover:text-danger-700"><Trash2 size={14} /></button>
                         </td>
@@ -631,7 +580,7 @@ export function FinancePage() {
       {tab === 'reports' && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[
-            { label: 'تقرير الإيرادات', icon: DollarSign, desc: 'إجمالي الإيرادات من العقود' },
+            { label: 'تقرير الإيرادات', icon: DollarSign, desc: 'إجمالي الإيرادات من العقود والزيارات الإضافية' },
             { label: 'تقرير المصروفات', icon: Receipt, desc: 'تفصيل المصروفات حسب التصنيف' },
             { label: 'الأرباح والخسائر', icon: TrendingUp, desc: 'صافي الربح أو الخسارة' },
             { label: 'المستحقات', icon: AlertCircle, desc: 'المدفوعات المعلقة' },
