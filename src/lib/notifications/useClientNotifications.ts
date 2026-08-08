@@ -13,6 +13,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { deliverNotification, warmAudioContext } from '@/lib/notifications/manager';
+import { unlockAudioContext } from '@/lib/notifications/sounds';
 import type { RichNotification } from '@/lib/notifications/types';
 
 interface UseClientNotificationsOptions {
@@ -39,6 +40,18 @@ export function useClientNotifications(options: UseClientNotificationsOptions = 
 
     warmAudioContext();
 
+    let unlocked = false;
+    const unlockFromGesture = () => {
+      if (unlocked) return;
+      unlocked = true;
+      unlockAudioContext();
+      document.removeEventListener('pointerdown', unlockFromGesture);
+      document.removeEventListener('keydown', unlockFromGesture);
+    };
+
+    document.addEventListener('pointerdown', unlockFromGesture, { passive: true });
+    document.addEventListener('keydown', unlockFromGesture, { passive: true });
+
     const channel = supabase
       .channel('client-notifications-realtime')
       .on('postgres_changes',
@@ -48,6 +61,8 @@ export function useClientNotifications(options: UseClientNotificationsOptions = 
       .subscribe();
 
     return () => {
+      document.removeEventListener('pointerdown', unlockFromGesture);
+      document.removeEventListener('keydown', unlockFromGesture);
       supabase.removeChannel(channel);
     };
   }, [enabled, handlePayload]);
