@@ -76,3 +76,25 @@ export function playSound(soundId: string): void {
 export function warmAudioContext(): void {
   getContext();
 }
+
+export function unlockAudioContext(): void {
+  const ctx = getContext();
+  if (!ctx) return;
+
+  const unlock = () => {
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.01);
+  };
+
+  if (ctx.state === 'suspended') {
+    void ctx.resume().then(unlock).catch(() => {});
+    return;
+  }
+
+  unlock();
+}
