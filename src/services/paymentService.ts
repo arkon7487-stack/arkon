@@ -43,6 +43,7 @@ export const paymentService = {
     });
     if (error) {
       const raw = `${error.message ?? ''}`;
+      if (raw.includes('already_paid')) throw new Error('هذه الفاتورة مدفوعة بالكامل');
       if (raw.includes('amount_exceeds_remaining')) throw new Error('قيمة الدفعة أكبر من المبلغ المتبقي');
       if (raw.includes('invalid_amount')) throw new Error('قيمة الدفعة يجب أن تكون أكبر من الصفر');
       if (raw.includes('not_authorized')) throw new Error('لا تملك صلاحية تسجيل الدفعات');

@@ -83,10 +83,11 @@ export const additionalVisitService = {
     const { data, error } = await supabase.rpc('record_visit_invoice_payment', { p_invoice_id: invoiceId, p_amount: amount, p_payment_method: method ?? null, p_notes: notes ?? null });
     if (error) {
       const raw = `${error.message ?? ''}`;
+      if (raw.includes('already_paid')) throw new Error('هذه الفاتورة مدفوعة بالكامل');
       if (raw.includes('amount_exceeds_remaining')) throw new Error('قيمة الدفعة أكبر من المبلغ المتبقي');
       if (raw.includes('invalid_amount')) throw new Error('قيمة الدفعة يجب أن تكون أكبر من الصفر');
       if (raw.includes('not_authorized')) throw new Error('لا تملك صلاحية تسجيل الدفعات');
-      throw new Error('تعذر تسجيل الدفعة');
+      throw new Error('تعذر تسجيل الدفعة. يرجى المحاولة مرة أخرى.');
     }
     return data;
   },
