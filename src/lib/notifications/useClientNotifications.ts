@@ -5,9 +5,12 @@
  * audience='client'. RLS ensures the client only sees their own
  * notifications (get_client_id_from_token via x-client-token header).
  *
- * On new notification: plays sound (best-effort), shows toast, calls callback.
+ * Each hook instance creates its own uniquely-named channel so multiple
+ * components can coexist without colliding on the same RealtimeChannel.
+ *
  * Sound only plays for NEW notifications arriving during the active session,
  * not for existing ones loaded on mount.
+ * Realtime failures are non-fatal — the page still renders existing data.
  */
 
 import { useEffect, useRef, useCallback } from 'react';
@@ -52,13 +55,23 @@ export function useClientNotifications(options: UseClientNotificationsOptions = 
     document.addEventListener('pointerdown', unlockFromGesture, { passive: true });
     document.addEventListener('keydown', unlockFromGesture, { passive: true });
 
+    const channelName = `client-notifications-realtime-${Math.random().toString(36).slice(2, 10)}`;
     const channel = supabase
-      .channel('client-notifications-realtime')
+      .channel(channelName)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications', filter: 'audience=eq.client' },
         handlePayload,
-      )
-      .subscribe();
+      );
+
+    try {
+      channel.subscribe();
+    } catch {
+      supabase.removeChannel(channel);
+      return () => {
+        document.removeEventListener('pointerdown', unlockFromGesture);
+        document.removeEventListener('keydown', unlockFromGesture);
+      };
+    }
 
     return () => {
       document.removeEventListener('pointerdown', unlockFromGesture);

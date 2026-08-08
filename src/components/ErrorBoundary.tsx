@@ -25,9 +25,6 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: { componentStack: string }) {
     if (import.meta.env.DEV) {
       console.error('[ARKON ERROR BOUNDARY]', error);
-      console.error('[ARKON ERROR BOUNDARY] name:', error.name);
-      console.error('[ARKON ERROR BOUNDARY] message:', error.message);
-      console.error('[ARKON ERROR BOUNDARY] stack:', error.stack);
       console.error('[ARKON COMPONENT STACK]', info.componentStack);
     }
   }
@@ -49,6 +46,11 @@ export class ErrorBoundary extends Component<Props, State> {
         <p className="max-w-md text-sm text-slate-500">
           تعذّر تحميل هذه الصفحة. يرجى المحاولة مرة أخرى، وإذا استمرت المشكلة تواصل مع الدعم الفني.
         </p>
+        {import.meta.env.DEV && this.state.message && (
+          <div className="max-w-2xl rounded-lg border border-danger-200 bg-danger-50 p-4 text-left" dir="ltr">
+            <p className="font-mono text-xs text-danger-900">{this.state.message}</p>
+          </div>
+        )}
         <div className="flex gap-2">
           <button onClick={this.reset} className="btn-primary">
             إعادة المحاولة

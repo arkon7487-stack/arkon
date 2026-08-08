@@ -1,14 +1,17 @@
 /**
  * useNotifications — React hook for subscribing to realtime notifications.
  *
- * Creates a SINGLE Supabase Realtime subscription on the notifications table
- * (INSERT events only). Filters by the current user's scope:
+ * Creates a Supabase Realtime subscription on the notifications table
+ * (INSERT events only). Each hook instance creates its own uniquely-named
+ * channel so multiple components (Header bell + full Notifications page)
+ * can coexist without colliding on the same RealtimeChannel instance.
+ *
+ * Scope filtering:
  * - Workers: only notifications where recipient_employee_id matches their employee_id
  * - Admins: all admin-audience notifications
  *
- * On new notification: calls the onNewNotification callback + triggers data refresh.
- *
  * Duplicate protection: the NotificationManager tracks processed IDs.
+ * Realtime failures are non-fatal — the page still renders existing data.
  */
 
 import { useEffect, useRef, useCallback } from 'react';
@@ -39,12 +42,9 @@ export function useNotifications(options: UseNotificationsOptions = {}): void {
     const row = payload.new as unknown as RichNotification;
     if (!row || !row.id) return;
 
-    // Scope filtering
     if (isAdmin) {
-      // Admins receive admin-audience notifications
       if (row.audience !== 'admin' && row.audience !== 'staff') return;
     } else if (employeeId) {
-      // Workers only receive their own notifications
       if (row.recipient_employee_id !== employeeId) return;
     } else {
       return;
@@ -57,16 +57,24 @@ export function useNotifications(options: UseNotificationsOptions = {}): void {
   useEffect(() => {
     if (!enabled || !session) return;
 
-    // Warm audio context on first interaction
     warmAudioContext();
 
+    const channelName = `notifications-realtime-${Math.random().toString(36).slice(2, 10)}`;
     const channel = supabase
-      .channel('notifications-realtime')
+      .channel(channelName)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'notifications' },
         handlePayload,
-      )
-      .subscribe();
+      );
+
+    try {
+      channel.subscribe();
+    } catch {
+      // Realtime subscription failure is non-fatal;
+      // existing notifications remain visible via the initial fetch.
+      supabase.removeChannel(channel);
+      return;
+    }
 
     return () => {
       supabase.removeChannel(channel);
