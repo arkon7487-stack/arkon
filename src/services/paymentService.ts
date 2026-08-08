@@ -32,20 +32,24 @@ export const paymentService = {
   },
 
   async record(input: PaymentInput): Promise<Payment> {
-    const { data, error } = await supabase
-      .from('payments')
-      .insert({
-        invoice_id: input.invoice_id,
-        amount: input.amount,
-        method: input.method ?? null,
-        reference: input.reference ?? null,
-        notes: input.notes ?? null,
-      })
-      .select('*')
-      .maybeSingle();
-    if (error) throw error;
-    const payment = data as Payment;
+    if (input.amount <= 0) throw new Error('قيمة الدفعة يجب أن تكون أكبر من الصفر');
 
+    const { data, error } = await supabase.rpc('record_visit_invoice_payment', {
+      p_invoice_id: input.invoice_id,
+      p_amount: input.amount,
+      p_payment_method: input.method ?? null,
+      p_payment_date: null,
+      p_notes: input.notes ?? input.reference ?? null,
+    });
+    if (error) {
+      const raw = `${error.message ?? ''}`;
+      if (raw.includes('amount_exceeds_remaining')) throw new Error('قيمة الدفعة أكبر من المبلغ المتبقي');
+      if (raw.includes('invalid_amount')) throw new Error('قيمة الدفعة يجب أن تكون أكبر من الصفر');
+      if (raw.includes('not_authorized')) throw new Error('لا تملك صلاحية تسجيل الدفعات');
+      throw new Error('تعذر تسجيل الدفعة. يرجى المحاولة مرة أخرى.');
+    }
+
+    const payment = data as Payment;
     await auditService.log({ action: 'payment_record', entityType: 'payment', entityId: payment.id, newValue: { amount: input.amount, method: input.method } });
 
     const { data: invoice } = await supabase
