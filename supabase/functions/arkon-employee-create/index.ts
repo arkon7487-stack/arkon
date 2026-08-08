@@ -40,7 +40,6 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // JWT verification — only authenticated admins can create employees
     const authHeader = req.headers.get("Authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return json({ error: "غير مصرح" }, 401);
@@ -56,7 +55,6 @@ Deno.serve(async (req: Request) => {
       return json({ error: "غير مصرح" }, 401);
     }
 
-    // Verify the caller is an admin
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -81,53 +79,38 @@ Deno.serve(async (req: Request) => {
       return json({ error: "طلب غير صالح: يجب أن يكون الجسم بتنسيق JSON" }, 400);
     }
 
-    if (!body.full_name?.trim()) {
-      return json({ error: "الاسم الكامل مطلوب" }, 400);
-    }
-    if (!body.phone_number?.trim()) {
-      return json({ error: "رقم الهاتف مطلوب" }, 400);
-    }
+    if (!body.full_name?.trim()) return json({ error: "الاسم الكامل مطلوب" }, 400);
+    if (!body.phone_number?.trim()) return json({ error: "رقم الهاتف مطلوب" }, 400);
 
-    // Check for duplicate phone number
     const { data: existingPhone } = await supabase
       .from("employees")
       .select("id")
       .eq("phone_number", body.phone_number.trim())
       .maybeSingle();
-    if (existingPhone) {
-      return json({ error: "رقم الهاتف مستخدم بالفعل من قِبل موظف آخر" }, 400);
-    }
+    if (existingPhone) return json({ error: "رقم الهاتف مستخدم بالفعل من قِبل موظف آخر" }, 400);
 
-    // Build a safe ASCII base from the provided username or full_name
     const rawUsername = (body.username?.trim() || body.full_name)
       .toLowerCase()
       .replace(/[\u0600-\u06FF]/g, (c) => translitAr(c))
       .replace(/[^a-z0-9]/g, ".")
       .replace(/\.{2,}/g, ".")
       .replace(/^\.|\.$/g, "");
-
-    // Always append a short random suffix so no two employees ever collide
     const suffix = Math.random().toString(36).slice(2, 6);
     const finalUsername = `${rawUsername || "emp"}.${suffix}`;
-
     const email = body.auth_email?.trim() || `${finalUsername}@arkon.enterprise`;
     const tempPassword = body.password?.trim() || generateTempPassword();
     const roleKey = body.role_key?.trim() || "field_employee";
     const jobTitle = body.position?.trim() || null;
 
-    // Check for duplicate auth_email before creating auth user
     if (body.auth_email?.trim()) {
       const { data: existingEmail } = await supabase
         .from("employees")
         .select("id")
         .eq("auth_email", body.auth_email.trim())
         .maybeSingle();
-      if (existingEmail) {
-        return json({ error: "البريد الإلكتروني مستخدم بالفعل من قِبل موظف آخر" }, 400);
-      }
+      if (existingEmail) return json({ error: "البريد الإلكتروني مستخدم بالفعل من قِبل موظف آخر" }, 400);
     }
 
-    // Create auth user
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password: tempPassword,
@@ -142,7 +125,6 @@ Deno.serve(async (req: Request) => {
     }
     const userId = authData.user.id;
 
-    // Insert employee record
     const { data: empData, error: empError } = await supabase
       .from("employees")
       .insert({
@@ -173,7 +155,6 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (empError || !empData) {
-      // Rollback: delete the just-created auth user
       await supabase.auth.admin.deleteUser(userId);
       const msg = empError?.message.includes("unique")
         ? "رقم الهاتف أو البريد الإلكتروني مستخدم بالفعل"
@@ -182,30 +163,30 @@ Deno.serve(async (req: Request) => {
     }
 
     const employee = empData;
-
-    // Assign role via profiles
     const { data: roleData } = await supabase
       .from("roles")
       .select("id")
       .eq("key", roleKey)
       .maybeSingle();
 
-    if (roleData) {
-      const { error: profileError } = await supabase.from("profiles").insert({
-        user_id: userId,
-        role_id: roleData.id,
-        employee_id: employee.id,
-        display_name: body.full_name.trim(),
-      });
-      if (profileError) {
-        // Non-fatal: employee and auth account are created. Log the issue.
-        console.error("Profile insert failed (non-fatal):", profileError.message);
-      }
-    } else {
-      console.error(`Role not found for key: ${roleKey} — profile not created`);
+    if (!roleData) {
+      await supabase.from("employees").delete().eq("id", employee.id);
+      await supabase.auth.admin.deleteUser(userId);
+      return json({ error: "الدور الوظيفي غير صالح" }, 400);
     }
 
-    // Log activity (best-effort, never blocks creation)
+    const { error: profileError } = await supabase.from("profiles").insert({
+      user_id: userId,
+      role_id: roleData.id,
+      employee_id: employee.id,
+      display_name: body.full_name.trim(),
+    });
+    if (profileError) {
+      await supabase.from("employees").delete().eq("id", employee.id);
+      await supabase.auth.admin.deleteUser(userId);
+      return json({ error: "فشل ربط حساب الموظف بملفه الوظيفي" }, 400);
+    }
+
     await supabase.from("activity_timeline").insert({
       entity_type: "employee",
       entity_id: employee.id,
@@ -239,7 +220,6 @@ function generateTempPassword(): string {
   return `Ark${out}!1`;
 }
 
-// Minimal Arabic → Latin transliteration for username generation
 const AR_MAP: Record<string, string> = {
   "ا": "a", "أ": "a", "إ": "i", "آ": "a", "ب": "b", "ت": "t", "ث": "th",
   "ج": "j", "ح": "h", "خ": "kh", "د": "d", "ذ": "z", "ر": "r", "ز": "z",

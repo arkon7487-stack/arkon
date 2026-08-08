@@ -54,7 +54,7 @@ This document describes the stable backend contract that the future React Native
 - **Method**: Phone number + 4-digit PIN (custom, not Supabase Auth)
 - **Edge function**: `arkon-client-auth` — handles `login`, `activate`, `validate_session`, `logout`, `change_pin`, `check_status` actions
 - **Token**: Returned as `token` in the response. Stored in secure storage. Sent as `x-client-token` header on all Supabase requests.
-- **Identity resolution**: `get_client_id_from_token()` reads `request.x_client_token` GUC → looks up `client_sessions` → returns `client_id`
+- **Identity resolution**: `get_client_id_from_token()` reads the PostgREST `request.headers ->> 'x-client-token'` header → looks up `client_sessions` → returns `client_id`
 - **Session expiry**: Client sessions have `expires_at` and `revoked` fields. Expired/revoked tokens return NULL from `get_client_id_from_token()`.
 
 ### Visits Retrieval
@@ -72,23 +72,22 @@ This document describes the stable backend contract that the future React Native
 - **RLS**: Client can only read their own contracts via `get_client_id_from_token()` policy
 
 ### Invoices / Payments / Receivables
-- **Source of truth**: The `contracts` table fields: `final_amount`, `amount_paid`, `remaining_balance`, `payment_status`. The `invoices` and `payments` tables provide detail records.
+- **Source of truth**: Contracts use `contracts.final_amount`, `amount_paid`, `remaining_balance`, and `payment_status`; additional/emergency obligations use `invoices.total`, `amount_paid`, `remaining_balance`, and `payment_status`, with detail in `payments`.
 - **No duplicate customer balance tables**: The Customer Portal derives all financial data from the same tables used by Finance/Receivables.
 - **Display fields**:
-  - القيمة الإجمالية (total): `contract.final_amount`
-  - المبلغ المدفوع (paid): `contract.amount_paid`
-  - المبلغ المتبقي (remaining): `contract.remaining_balance`
-  - حالة الدفع (payment status): `contract.payment_status` — مدفوع / مدفوع جزئياً / غير مدفوع
-  - المستحق (receivable): `contract.remaining_balance`
-- **Synchronization**: When Admin/Finance records a payment, `contract.amount_paid` and `contract.remaining_balance` are updated. Customer Portal reads these fields directly — no separate calculation.
+  - Original contract total: `contract.final_amount`
+  - Original contract paid/remaining/status: `contract.amount_paid`, `contract.remaining_balance`, `contract.payment_status`
+  - Additional/emergency invoice total/paid/remaining/status: `invoice.total`, `invoice.amount_paid`, `invoice.remaining_balance`, `invoice.payment_status`
+  - Receivables: contract remaining balances plus remaining balances on separately billable visit invoices
+- **Synchronization**: Contract payments update contract-level fields. Additional/emergency payments update only the linked invoice through `record_visit_invoice_payment`. Customer Portal reads these same records directly — no separate balance tables.
 
 ### Service Requests
 - **Query**: `serviceRequestService.listByClient(clientId)`
-- **Create**: `serviceRequestService.create({ client_id, subject, description })`
+- **Create**: `serviceRequestService.create({ client_id, subject, description })
 
 ### Ratings
 - **Query**: `ratingService.getByVisit(visitId)`
-- **Create**: `ratingService.create({ visitId, clientId, employeeId, rating, comment })`
+- **Create**: `ratingService.create({ visitId, clientId, employeeId, rating, comment })
 
 ### Additional/Emergency Visits
 - **Service**: `additionalVisitService` — handles creation, worker availability, and financial charges for additional/emergency visits
